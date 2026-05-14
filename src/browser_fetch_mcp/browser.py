@@ -276,7 +276,7 @@ class BrowserClient:
         try:
             async with async_playwright() as playwright:
                 browser = await playwright.chromium.connect_over_cdp(self.settings.cdp_endpoint)
-                context = await create_browser_context(browser)
+                context = await create_browser_context(browser, self.settings)
                 page = await context.new_page()
                 page.set_default_navigation_timeout(self.settings.navigation_timeout_ms)
                 page.set_default_timeout(self.settings.navigation_timeout_ms)

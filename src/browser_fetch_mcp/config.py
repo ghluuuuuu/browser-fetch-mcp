@@ -16,6 +16,10 @@ class Settings(BaseModel):
     transport: Transport = "streamable-http"
     host: str = "127.0.0.1"
     port: int = Field(default=8000, ge=1, le=65535)
+    access_key: str = ""
+    browser_proxy_server: str = ""
+    browser_proxy_username: str = ""
+    browser_proxy_password: str = ""
     navigation_timeout_ms: int = Field(default=30_000, ge=1)
     batch_concurrency: int = Field(default=3, ge=1, le=32)
     default_search_engine: SearchEngine = "bing"
@@ -29,12 +33,38 @@ class Settings(BaseModel):
             raise ValueError("cdp_endpoint must start with ws://, wss://, http://, or https://")
         return value
 
+    @field_validator("access_key")
+    @classmethod
+    def normalize_access_key(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("browser_proxy_server")
+    @classmethod
+    def validate_browser_proxy_server(cls, value: str) -> str:
+        value = value.strip()
+        if value.startswith("sock5://"):
+            value = "socks5://" + value.removeprefix("sock5://")
+        if value.startswith("sock4://"):
+            value = "socks4://" + value.removeprefix("sock4://")
+        if value and not value.startswith(("http://", "https://", "socks4://", "socks5://")):
+            raise ValueError("browser_proxy_server must start with http://, https://, socks4://, or socks5://")
+        return value
+
+    @field_validator("browser_proxy_username", "browser_proxy_password")
+    @classmethod
+    def normalize_browser_proxy_credentials(cls, value: str) -> str:
+        return value.strip()
+
 
 ENV_MAP = {
     "CDP_ENDPOINT": "cdp_endpoint",
     "MCP_TRANSPORT": "transport",
     "MCP_HOST": "host",
     "MCP_PORT": "port",
+    "MCP_ACCESS_KEY": "access_key",
+    "BROWSER_PROXY_SERVER": "browser_proxy_server",
+    "BROWSER_PROXY_USERNAME": "browser_proxy_username",
+    "BROWSER_PROXY_PASSWORD": "browser_proxy_password",
     "NAVIGATION_TIMEOUT_MS": "navigation_timeout_ms",
     "BATCH_CONCURRENCY": "batch_concurrency",
     "DEFAULT_SEARCH_ENGINE": "default_search_engine",

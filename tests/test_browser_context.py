@@ -4,6 +4,7 @@ from browser_fetch_mcp.browser_context import (
     browser_context_options,
     create_browser_context,
 )
+from browser_fetch_mcp.config import Settings
 
 
 def test_browser_context_options_match_requested_fingerprint() -> None:
@@ -18,6 +19,23 @@ def test_browser_context_options_match_requested_fingerprint() -> None:
     assert options["extra_http_headers"] == {
         "Accept-Language": "zh-CN,zh;q=0.9",
         "DNT": "1",
+    }
+    assert "proxy" not in options
+
+
+def test_browser_context_options_adds_configured_proxy() -> None:
+    settings = Settings(
+        browser_proxy_server="socks5://127.0.0.1:1080",
+        browser_proxy_username=" user ",
+        browser_proxy_password=" pass ",
+    )
+
+    options = browser_context_options(settings)
+
+    assert options["proxy"] == {
+        "server": "socks5://127.0.0.1:1080",
+        "username": "user",
+        "password": "pass",
     }
 
 

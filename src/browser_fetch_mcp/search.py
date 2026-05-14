@@ -598,7 +598,7 @@ class SearchService:
         try:
             async with async_playwright() as playwright:
                 browser = await playwright.chromium.connect_over_cdp(self.browser.settings.cdp_endpoint)
-                context = await create_browser_context(browser)
+                context = await create_browser_context(browser, self.browser.settings)
                 browser_page = await context.new_page()
                 browser_page.set_default_navigation_timeout(self.browser.settings.navigation_timeout_ms)
                 browser_page.set_default_timeout(self.browser.settings.navigation_timeout_ms)

@@ -25,6 +25,10 @@ Defaults are loaded from `config.example.yaml`. Environment variables override f
 - `CDP_ENDPOINT`
 - `MCP_HOST`
 - `MCP_PORT`
+- `MCP_ACCESS_KEY`
+- `BROWSER_PROXY_SERVER`
+- `BROWSER_PROXY_USERNAME`
+- `BROWSER_PROXY_PASSWORD`
 - `NAVIGATION_TIMEOUT_MS`
 - `BATCH_CONCURRENCY`
 - `DEFAULT_SEARCH_ENGINE`
@@ -32,6 +36,12 @@ Defaults are loaded from `config.example.yaml`. Environment variables override f
 - `MAX_CONTENT_LENGTH`
 
 `MCP_TRANSPORT` is accepted for compatibility with older deployments, but it no longer disables either transport endpoint.
+
+Set `access_key` in the config file or `MCP_ACCESS_KEY` in the environment to require authentication on `/mcp`, `/sse`, and `/messages/`.
+Clients can pass the key with `Authorization: Bearer <key>`, `X-API-Key: <key>`, or `?api_key=<key>`.
+
+Set `browser_proxy_server` or `BROWSER_PROXY_SERVER` to route browser page traffic through a proxy.
+For SOCKS5, use a value such as `socks5://127.0.0.1:1080`; optional username and password can be set with `browser_proxy_username` / `browser_proxy_password` or the matching environment variables.
 
 ## Docker
 

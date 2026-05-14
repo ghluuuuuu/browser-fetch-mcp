@@ -1,3 +1,5 @@
 cdp_endpoint: ws://file:9222
 transport: sse
 port: 9000
+access_key: file-key
+browser_proxy_server: socks5://file-proxy:1080

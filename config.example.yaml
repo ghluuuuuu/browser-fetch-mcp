@@ -1,6 +1,10 @@
 cdp_endpoint: http://127.0.0.1:9222
 host: 0.0.0.0
 port: 8000
+access_key: ""
+browser_proxy_server: ""
+browser_proxy_username: ""
+browser_proxy_password: ""
 navigation_timeout_ms: 30000
 batch_concurrency: 3
 default_search_engine: bing

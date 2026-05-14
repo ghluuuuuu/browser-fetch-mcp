@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .config import Settings
+
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -40,8 +42,8 @@ BROWSER_FINGERPRINT_INIT_SCRIPT = """
 """
 
 
-def browser_context_options() -> dict[str, Any]:
-    return {
+def browser_context_options(settings: Settings | None = None) -> dict[str, Any]:
+    options = {
         "user_agent": USER_AGENT,
         "viewport": VIEWPORT,
         "screen": SCREEN,
@@ -55,9 +57,17 @@ def browser_context_options() -> dict[str, Any]:
             "DNT": "1",
         },
     }
+    if settings and settings.browser_proxy_server:
+        proxy: dict[str, str] = {"server": settings.browser_proxy_server}
+        if settings.browser_proxy_username:
+            proxy["username"] = settings.browser_proxy_username
+        if settings.browser_proxy_password:
+            proxy["password"] = settings.browser_proxy_password
+        options["proxy"] = proxy
+    return options
 
 
-async def create_browser_context(browser):
-    context = await browser.new_context(**browser_context_options())
+async def create_browser_context(browser, settings: Settings | None = None):
+    context = await browser.new_context(**browser_context_options(settings))
     await context.add_init_script(BROWSER_FINGERPRINT_INIT_SCRIPT)
     return context

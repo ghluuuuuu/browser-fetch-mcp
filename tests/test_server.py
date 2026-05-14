@@ -1,3 +1,5 @@
+import httpx
+
 from browser_fetch_mcp.config import Settings
 from browser_fetch_mcp.server import create_app, create_mcp
 
@@ -27,6 +29,33 @@ def test_transport_config_does_not_disable_endpoint_routes() -> None:
 
     assert "/mcp" in paths
     assert "/sse" in paths
+
+
+async def test_access_key_rejects_missing_or_invalid_requests() -> None:
+    app = create_app(Settings(access_key="secret"))
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        missing = await client.get("/sse")
+        invalid = await client.get("/sse", headers={"Authorization": "Bearer wrong"})
+
+    assert missing.status_code == 401
+    assert missing.json() == {"error": "Unauthorized"}
+    assert invalid.status_code == 401
+
+
+async def test_access_key_accepts_bearer_and_api_key_headers() -> None:
+    app = create_app(Settings(access_key="secret"))
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        bearer = await client.get("/not-found", headers={"Authorization": "Bearer secret"})
+        api_key = await client.get("/not-found", headers={"X-API-Key": "secret"})
+        query_key = await client.get("/not-found?api_key=secret")
+
+    assert bearer.status_code != 401
+    assert api_key.status_code != 401
+    assert query_key.status_code != 401
 
 
 async def test_fetch_tools_expose_asset_include_flags() -> None:

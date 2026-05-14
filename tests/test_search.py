@@ -17,7 +17,7 @@ from browser_fetch_mcp.search import (
 
 @pytest.fixture(autouse=True)
 def fake_search_browser_context(monkeypatch):
-    async def create_context(browser):
+    async def create_context(browser, settings=None):
         return await browser.new_context()
 
     monkeypatch.setattr("browser_fetch_mcp.search.create_browser_context", create_context)

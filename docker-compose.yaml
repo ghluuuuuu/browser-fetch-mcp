@@ -30,6 +30,10 @@ services:
       CDP_ENDPOINT: http://172.28.10.10:9222
       MCP_HOST: 0.0.0.0
       MCP_PORT: 8000
+      MCP_ACCESS_KEY: ${MCP_ACCESS_KEY:-}
+      BROWSER_PROXY_SERVER: ${BROWSER_PROXY_SERVER:-}
+      BROWSER_PROXY_USERNAME: ${BROWSER_PROXY_USERNAME:-}
+      BROWSER_PROXY_PASSWORD: ${BROWSER_PROXY_PASSWORD:-}
     networks:
       - browser-fetch-internal
 

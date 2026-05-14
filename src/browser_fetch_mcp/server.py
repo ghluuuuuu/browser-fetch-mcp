@@ -1,13 +1,60 @@
+import secrets
 from typing import Annotated
+from urllib.parse import parse_qs
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 from starlette.applications import Starlette
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .browser import BrowserClient
 from .config import Settings, load_settings
 from .models import BatchFetchResult
 from .search import SearchService
+
+
+class AccessKeyMiddleware:
+    def __init__(self, app: ASGIApp, access_key: str):
+        self.app = app
+        self.access_key = access_key
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or self._is_authorized(scope):
+            await self.app(scope, receive, send)
+            return
+
+        response = JSONResponse({"error": "Unauthorized"}, status_code=401)
+        await response(scope, receive, send)
+
+    def _is_authorized(self, scope: Scope) -> bool:
+        expected = self.access_key
+        if not expected:
+            return True
+
+        provided = self._header_value(scope, b"x-api-key")
+        authorization = self._header_value(scope, b"authorization")
+        if authorization:
+            scheme, _, token = authorization.partition(" ")
+            if scheme.lower() == "bearer":
+                provided = token
+
+        if not provided:
+            provided = self._query_param(scope, "api_key")
+
+        return bool(provided) and secrets.compare_digest(provided, expected)
+
+    @staticmethod
+    def _header_value(scope: Scope, name: bytes) -> str:
+        for header_name, header_value in scope.get("headers", []):
+            if header_name.lower() == name:
+                return header_value.decode("latin-1").strip()
+        return ""
+
+    @staticmethod
+    def _query_param(scope: Scope, name: str) -> str:
+        raw_query = scope.get("query_string", b"").decode("latin-1")
+        return parse_qs(raw_query).get(name, [""])[0].strip()
 
 
 def create_mcp(settings: Settings | None = None) -> FastMCP:
@@ -256,17 +303,21 @@ def create_mcp(settings: Settings | None = None) -> FastMCP:
     return mcp
 
 
-def create_app(settings: Settings | None = None) -> Starlette:
-    mcp = create_mcp(settings)
+def create_app(settings: Settings | None = None) -> ASGIApp:
+    resolved = settings or load_settings()
+    mcp = create_mcp(resolved)
     streamable_http_app = mcp.streamable_http_app()
     sse_app = mcp.sse_app()
 
-    return Starlette(
+    app = Starlette(
         debug=mcp.settings.debug,
         routes=[*streamable_http_app.routes, *sse_app.routes],
         middleware=[*streamable_http_app.user_middleware, *sse_app.user_middleware],
         lifespan=lambda app: mcp.session_manager.run(),
     )
+    if resolved.access_key:
+        return AccessKeyMiddleware(app, resolved.access_key)
+    return app
 
 
 def main() -> None:
