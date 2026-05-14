@@ -15,6 +15,14 @@ from browser_fetch_mcp.search import (
 )
 
 
+@pytest.fixture(autouse=True)
+def fake_search_browser_context(monkeypatch):
+    async def create_context(browser):
+        return await browser.new_context()
+
+    monkeypatch.setattr("browser_fetch_mcp.search.create_browser_context", create_context)
+
+
 def test_normalize_engine_defaults_and_alias() -> None:
     assert normalize_engine(None, "bing") == "bing"
     assert normalize_engine("auto", "baidu") == "baidu"

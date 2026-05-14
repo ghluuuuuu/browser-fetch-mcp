@@ -9,6 +9,7 @@ from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import async_playwright
 
 from .config import Settings
+from .browser_context import create_browser_context
 from .models import FetchResult, make_error_result, make_fetch_result, stringify_page_value, validate_http_url
 from .playwright_utils import close_quietly
 
@@ -275,7 +276,7 @@ class BrowserClient:
         try:
             async with async_playwright() as playwright:
                 browser = await playwright.chromium.connect_over_cdp(self.settings.cdp_endpoint)
-                context = await browser.new_context()
+                context = await create_browser_context(browser)
                 page = await context.new_page()
                 page.set_default_navigation_timeout(self.settings.navigation_timeout_ms)
                 page.set_default_timeout(self.settings.navigation_timeout_ms)

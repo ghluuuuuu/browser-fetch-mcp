@@ -11,6 +11,7 @@ from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import async_playwright
 
 from .browser import BrowserClient
+from .browser_context import create_browser_context
 from .config import SearchEngine
 from .models import ImageSearchItem, ImageSearchResult, SearchResult, SearchRow
 from .playwright_utils import close_quietly
@@ -634,7 +635,7 @@ class SearchService:
         try:
             async with async_playwright() as playwright:
                 browser = await playwright.chromium.connect_over_cdp(self.browser.settings.cdp_endpoint)
-                context = await browser.new_context()
+                context = await create_browser_context(browser)
                 browser_page = await context.new_page()
                 browser_page.set_default_navigation_timeout(self.browser.settings.navigation_timeout_ms)
                 browser_page.set_default_timeout(self.browser.settings.navigation_timeout_ms)
