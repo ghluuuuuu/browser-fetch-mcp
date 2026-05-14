@@ -1,4 +1,7 @@
+from typing import Annotated
+
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 from starlette.applications import Starlette
 
 from .browser import BrowserClient
@@ -22,20 +25,57 @@ def create_mcp(settings: Settings | None = None) -> FastMCP:
 
     @mcp.tool(name="fetch")
     async def fetch_tool(
-        url: str,
-        start_index: int = 0,
-        max_length: int = 20_000,
-        exec_js: str = "",
-        links_start_index: int = 0,
-        links_max_length: int = 50,
-        images_start_index: int = 0,
-        images_max_length: int = 50,
+        url: Annotated[str, Field(description="Absolute http or https URL to fetch.")],
+        start_index: Annotated[
+            int,
+            Field(description="Zero-based content start offset for slicing returned text."),
+        ] = 0,
+        max_length: Annotated[
+            int,
+            Field(description="Maximum number of content characters to return."),
+        ] = 20_000,
+        exec_js: Annotated[
+            str,
+            Field(description="Optional JavaScript expression to evaluate instead of default text extraction."),
+        ] = "",
+        links_start_index: Annotated[
+            int,
+            Field(description="Zero-based start offset for the returned link list."),
+        ] = 0,
+        links_max_length: Annotated[
+            int,
+            Field(description="Maximum number of links to return. Use 0 to return no link items."),
+        ] = 50,
+        images_start_index: Annotated[
+            int,
+            Field(description="Zero-based start offset for the returned image list."),
+        ] = 0,
+        images_max_length: Annotated[
+            int,
+            Field(description="Maximum number of images to return. Use 0 to return no image items."),
+        ] = 50,
+        include_links: Annotated[
+            bool,
+            Field(description="Whether to extract the page link list. Enable when links are needed."),
+        ] = False,
+        include_images: Annotated[
+            bool,
+            Field(description="Whether to extract the page image list. Enable when images are needed."),
+        ] = False,
+        auto_scroll: Annotated[
+            bool,
+            Field(description="Whether to scroll down before extracting content and assets."),
+        ] = False,
+        auto_scroll_max_distance: Annotated[
+            int,
+            Field(description="Maximum downward scroll distance in pixels for lazy-loaded pages."),
+        ] = 0,
     ) -> dict:
-        """Fetch one page through CDP and return text plus page assets.
+        """Get the content of a specified web page.
 
         Returns sliced page content, links, and images. Links contain name and url.
-        Images contain name and url. Use links_start_index/links_max_length and
-        images_start_index/images_max_length to page through large asset lists.
+        Images contain name, url, alt, width, and height. If content from multiple
+        pages is needed, prefer batch-fetch instead of calling fetch repeatedly.
         """
         max_length = min(max_length, resolved.max_content_length)
         result = await browser.fetch(
@@ -47,24 +87,65 @@ def create_mcp(settings: Settings | None = None) -> FastMCP:
             links_max_length=links_max_length,
             images_start_index=images_start_index,
             images_max_length=images_max_length,
+            include_links=include_links,
+            include_images=include_images,
+            auto_scroll=auto_scroll,
+            auto_scroll_max_distance=auto_scroll_max_distance,
         )
         return result.model_dump()
 
     @mcp.tool(name="batch-fetch")
     async def batch_fetch_tool(
-        urls: list,
-        start_index: int = 0,
-        max_length: int = 20_000,
-        exec_js: str = "",
-        links_start_index: int = 0,
-        links_max_length: int = 50,
-        images_start_index: int = 0,
-        images_max_length: int = 50,
+        urls: Annotated[list[str], Field(description="Absolute http or https URLs to fetch.")],
+        start_index: Annotated[
+            int,
+            Field(description="Zero-based content start offset for slicing returned text."),
+        ] = 0,
+        max_length: Annotated[
+            int,
+            Field(description="Maximum number of content characters to return per URL."),
+        ] = 20_000,
+        exec_js: Annotated[
+            str,
+            Field(description="Optional JavaScript expression to evaluate on each page."),
+        ] = "",
+        links_start_index: Annotated[
+            int,
+            Field(description="Zero-based start offset for each returned link list."),
+        ] = 0,
+        links_max_length: Annotated[
+            int,
+            Field(description="Maximum number of links to return per URL. Use 0 for no link items."),
+        ] = 50,
+        images_start_index: Annotated[
+            int,
+            Field(description="Zero-based start offset for each returned image list."),
+        ] = 0,
+        images_max_length: Annotated[
+            int,
+            Field(description="Maximum number of images to return per URL. Use 0 for no image items."),
+        ] = 50,
+        include_links: Annotated[
+            bool,
+            Field(description="Whether to extract page link lists. Enable when links are needed."),
+        ] = False,
+        include_images: Annotated[
+            bool,
+            Field(description="Whether to extract page image lists. Enable when images are needed."),
+        ] = False,
+        auto_scroll: Annotated[
+            bool,
+            Field(description="Whether to scroll each page before extracting content and assets."),
+        ] = False,
+        auto_scroll_max_distance: Annotated[
+            int,
+            Field(description="Maximum downward scroll distance in pixels for lazy-loaded pages."),
+        ] = 0,
     ) -> dict:
-        """Fetch multiple pages through CDP and return text plus page assets for each URL.
+        """Get the content of multiple specified web pages.
 
-        Each result includes sliced page content, links, and images. Use the links/images
-        start and max parameters to limit returned asset list ranges.
+        Prefer this tool when content from multiple web pages is needed. Each result
+        includes sliced page content, links, and images.
         """
         if not urls:
             raise ValueError("urls must contain at least one URL")
@@ -78,16 +159,41 @@ def create_mcp(settings: Settings | None = None) -> FastMCP:
             links_max_length=links_max_length,
             images_start_index=images_start_index,
             images_max_length=images_max_length,
+            include_links=include_links,
+            include_images=include_images,
+            auto_scroll=auto_scroll,
+            auto_scroll_max_distance=auto_scroll_max_distance,
         )
         return BatchFetchResult(results=results).model_dump()
 
     @mcp.tool(name="search")
     async def search_tool(
-        keyword: str,
-        engine: str = "auto",
-        page: int = 1,
+        keyword: Annotated[
+            str,
+            Field(
+                description=(
+                    "Search keywords. Include key error text, product/library name, version, "
+                    "location, date, or official/docs/release-notes qualifiers when useful."
+                ),
+            ),
+        ],
+        engine: Annotated[
+            str,
+            Field(
+                description=(
+                    'Search engine: "auto", "bing", "baidu", or "google"; "bind" is treated '
+                    'as "bing". Prefer baidu for Chinese or China-specific queries, and google '
+                    "or bing for non-Chinese/global technical queries."
+                ),
+            ),
+        ] = "auto",
+        page: Annotated[
+            int,
+            Field(description="Search result page number, starting at 1. Try page > 1 for more results."),
+        ] = 1,
     ) -> dict:
         """Search the web and return candidate result links.
+
     This tool only discovers URLs and returns search metadata such as titles,
     snippets, and links. It does not open pages or retrieve full content.
     Critical rule:
@@ -111,35 +217,31 @@ def create_mcp(settings: Settings | None = None) -> FastMCP:
       release notes, government sites, official weather services, CVE/vendor advisories.
     - Use multiple sources for fast-changing or conflicting information.
     - If fetched content is blocked, empty, or irrelevant, try other result URLs.
-    Args:
-        keyword: Specific search keywords, including key error text, product/library name,
-            version, location, date, or "official/docs/release notes" when useful.
-        engine: Search engine to use: "auto", "bing", "baidu", or "google".
-        page: Search result page number, starting at 1.
-    Returns:
-        Search result metadata with candidate URLs and pagination info.
         """
         result = await search_service.search(keyword, engine=engine or None, page=page)
         return result.model_dump()
 
     @mcp.tool(name="search_img")
     async def search_img_tool(
-        keyword: str,
-        engine: str = "auto",
-        page: int = 1,
+        keyword: Annotated[str, Field(description="Image search keywords.")],
+        engine: Annotated[
+            str,
+            Field(
+                description=(
+                    'Image search engine: "auto", "bing", "baidu", or "google". Prefer baidu '
+                    "for Chinese image searches, and google or bing for non-Chinese/global images."
+                ),
+            ),
+        ] = "auto",
+        page: Annotated[
+            int,
+            Field(description="Image search result page number, starting at 1."),
+        ] = 1,
     ) -> dict:
         """Search internet images and return image result metadata.
 
         This tool searches image search pages through CDP and returns image names,
-        image URLs, and pixel sizes when available. It does not fetch the target page
-        content. Use "baidu" for Chinese image searches and "google" or "bing" for
-        non-Chinese/global image searches. If one engine returns weak results, retry
-        with another engine or page > 1.
-
-        Args:
-            keyword: Image search keywords.
-            engine: Image search engine: "auto", "bing", "baidu", or "google".
-            page: Image search page number, starting at 1.
+        image URLs, and pixel sizes when available. It does not fetch target page content.
         """
         result = await search_service.search_img(keyword, engine=engine or None, page=page)
         return result.model_dump()

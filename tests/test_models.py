@@ -41,8 +41,8 @@ def test_make_fetch_result_slices_links_and_images() -> None:
         links_start_index=1,
         links_max_length=1,
         images=[
-            {"name": "A", "url": "https://example.com/a.png"},
-            {"name": "B", "url": "https://example.com/b.png"},
+            {"name": "A", "url": "https://example.com/a.png", "alt": "Alpha", "width": 640, "height": 480},
+            {"name": "B", "url": "https://example.com/b.png", "alt": "", "width": None, "height": None},
         ],
         images_start_index=0,
         images_max_length=1,
@@ -50,7 +50,9 @@ def test_make_fetch_result_slices_links_and_images() -> None:
 
     assert result.links == [{"name": "Two", "url": "https://example.com/2"}]
     assert result.links_total == 2
-    assert result.images == [{"name": "A", "url": "https://example.com/a.png"}]
+    assert result.images == [
+        {"name": "A", "url": "https://example.com/a.png", "alt": "Alpha", "width": 640, "height": 480}
+    ]
     assert result.images_total == 2
 
 

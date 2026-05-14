@@ -18,7 +18,7 @@ class FetchResult(BaseModel):
     links_start_index: int = 0
     links_max_length: int = 50
     links_total: int = 0
-    images: list[dict[str, str]] = Field(default_factory=list)
+    images: list[dict[str, str | int | None]] = Field(default_factory=list)
     images_start_index: int = 0
     images_max_length: int = 50
     images_total: int = 0
@@ -83,7 +83,7 @@ def slice_content(content: str, start_index: int, max_length: int) -> tuple[str,
     return content[start_index : start_index + max_length], len(content)
 
 
-def slice_items(items: list[dict[str, str]], start_index: int, max_length: int) -> tuple[list[dict[str, str]], int]:
+def slice_items[T](items: list[T], start_index: int, max_length: int) -> tuple[list[T], int]:
     if start_index < 0:
         raise ValueError("item start_index must be greater than or equal to 0")
     if max_length < 0:
@@ -100,7 +100,7 @@ def make_fetch_result(
     links: list[dict[str, str]] | None = None,
     links_start_index: int = 0,
     links_max_length: int = 50,
-    images: list[dict[str, str]] | None = None,
+    images: list[dict[str, str | int | None]] | None = None,
     images_start_index: int = 0,
     images_max_length: int = 50,
 ) -> FetchResult:
