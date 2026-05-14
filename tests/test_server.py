@@ -1,5 +1,5 @@
-from obscura_web_fetch_mcp.config import Settings
-from obscura_web_fetch_mcp.server import create_app, create_mcp
+from browser_fetch_mcp.config import Settings
+from browser_fetch_mcp.server import create_app, create_mcp
 
 
 def test_create_mcp_configures_both_transport_paths() -> None:
@@ -56,3 +56,6 @@ async def test_tool_parameter_prompts_are_in_parameter_schema() -> None:
     assert "Absolute http or https URL" in tools["fetch"].inputSchema["properties"]["url"]["description"]
     assert "Search engine" in tools["search"].inputSchema["properties"]["engine"]["description"]
     assert "Image search engine" in tools["search_img"].inputSchema["properties"]["engine"]["description"]
+    assert "Markdown image previews" in tools["search_img"].description
+    assert "thumbnail or cached image URLs" in tools["search_img"].description
+    assert "call `fetch` on the corresponding" in tools["search_img"].description

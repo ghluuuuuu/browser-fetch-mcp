@@ -15,7 +15,7 @@ def create_mcp(settings: Settings | None = None) -> FastMCP:
     browser = BrowserClient(resolved)
     search_service = SearchService(browser)
     mcp = FastMCP(
-        "obscura-web-fetch",
+        "browser-fetch",
         host=resolved.host,
         port=resolved.port,
         streamable_http_path="/mcp",
@@ -241,7 +241,14 @@ def create_mcp(settings: Settings | None = None) -> FastMCP:
         """Search internet images and return image result metadata.
 
         This tool searches image search pages through CDP and returns image names,
-        image URLs, and pixel sizes when available. It does not fetch target page content.
+        image URLs, source page URLs, and pixel sizes when available. The returned
+        `images[].url` values are suitable for Markdown image previews, for example
+        `![name](url)`, but search engines may return thumbnail or cached image URLs.
+        When the user needs the original image, call `fetch` on the corresponding
+        `images[].link_url` source page when present, then inspect that page for the
+        original image URL. If no source page is available, call `fetch` on the image
+        URL itself to verify what it actually resolves to before presenting it as an
+        original image.
         """
         result = await search_service.search_img(keyword, engine=engine or None, page=page)
         return result.model_dump()

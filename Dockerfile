@@ -16,4 +16,4 @@ RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple .
 
 EXPOSE 8000
 
-CMD ["obscura-web-fetch-mcp"]
+CMD ["browser-fetch-mcp"]

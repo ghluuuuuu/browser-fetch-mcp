@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from obscura_web_fetch_mcp.config import load_settings
+from browser_fetch_mcp.config import load_settings
 
 
 def test_load_settings_uses_file_and_env_override(tmp_path: Path) -> None:

@@ -3,10 +3,11 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 import pytest
 
-from obscura_web_fetch_mcp.search import (
+from browser_fetch_mcp.search import (
     ADAPTERS,
     IMAGE_ADAPTERS,
     SearchService,
+    pacing_for_engine,
     parse_image_rows,
     normalize_engine,
     parse_search_rows,
@@ -167,6 +168,16 @@ def test_image_extract_js_reads_image_metadata() -> None:
     assert "height" in script
 
 
+def test_google_search_uses_slower_pacing() -> None:
+    google = pacing_for_engine("google")
+    bing = pacing_for_engine("bing")
+
+    assert google.incremental_scroll is True
+    assert google.pre_navigation_delay_ms[0] > bing.pre_navigation_delay_ms[0]
+    assert google.post_navigation_delay_ms[0] > bing.post_navigation_delay_ms[0]
+    assert google.poll_interval_ms[0] > bing.poll_interval_ms[0]
+
+
 class FakeSettings:
     cdp_endpoint = "ws://127.0.0.1:9222"
     navigation_timeout_ms = 2_000
@@ -232,18 +243,24 @@ async def test_evaluate_search_retries_until_rows(monkeypatch) -> None:
         async def __aexit__(self, exc_type, exc, tb):
             return None
 
-    monkeypatch.setattr("obscura_web_fetch_mcp.search.async_playwright", lambda: FakePlaywright())
+    monkeypatch.setattr("browser_fetch_mcp.search.async_playwright", lambda: FakePlaywright())
 
     service = SearchService(FakeBrowser())  # type: ignore[arg-type]
-    payload = await service._evaluate_search("https://cn.bing.com/search?q=x", "() => []", ["#b_results"])
+    payload = await service._evaluate_search(
+        "https://cn.bing.com/search?q=x",
+        "() => []",
+        ["#b_results"],
+        engine="bing",
+    )
 
     assert payload == {"rows": [{"title": "Result", "url": "https://example.com"}], "totalPages": 9}
     assert calls["evaluate"] == 2
 
 
 async def test_search_returns_page_metadata(monkeypatch) -> None:
-    async def fake_evaluate_search(self, url, extract_js, selectors):
+    async def fake_evaluate_search(self, url, extract_js, selectors, *, engine=None):
         assert url.endswith("&first=21")
+        assert engine == "bing"
         return {
             "rows": [{"title": "Result", "url": "https://example.com"}],
             "totalPages": 9,
@@ -260,8 +277,9 @@ async def test_search_returns_page_metadata(monkeypatch) -> None:
 
 
 async def test_search_img_returns_image_metadata(monkeypatch) -> None:
-    async def fake_evaluate_search(self, url, extract_js, selectors):
+    async def fake_evaluate_search(self, url, extract_js, selectors, *, engine=None):
         assert "/images/search" in url
+        assert engine == "bing"
         return {
             "images": [
                 {

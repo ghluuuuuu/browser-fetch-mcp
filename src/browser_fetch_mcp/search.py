@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import json
+import random
 import re
 from urllib.parse import quote, quote_plus
 
@@ -13,6 +14,65 @@ from .browser import BrowserClient
 from .config import SearchEngine
 from .models import ImageSearchItem, ImageSearchResult, SearchResult, SearchRow
 from .playwright_utils import close_quietly
+
+
+GOOGLE_SEARCH_LOCK = asyncio.Lock()
+
+
+@dataclass(frozen=True)
+class SearchPacing:
+    pre_navigation_delay_ms: tuple[int, int] = (0, 0)
+    post_navigation_delay_ms: tuple[int, int] = (0, 0)
+    selector_timeout_ms: int = 10_000
+    scroll_steps: int = 4
+    scroll_pause_ms: tuple[int, int] = (350, 350)
+    poll_interval_ms: tuple[int, int] = (500, 500)
+    incremental_scroll: bool = False
+
+
+DEFAULT_SEARCH_PACING = SearchPacing()
+GOOGLE_SEARCH_PACING = SearchPacing(
+    pre_navigation_delay_ms=(900, 1_800),
+    post_navigation_delay_ms=(1_200, 2_400),
+    selector_timeout_ms=15_000,
+    scroll_steps=5,
+    scroll_pause_ms=(700, 1_300),
+    poll_interval_ms=(900, 1_500),
+    incremental_scroll=True,
+)
+
+
+def pacing_for_engine(engine: SearchEngine | None) -> SearchPacing:
+    return GOOGLE_SEARCH_PACING if engine == "google" else DEFAULT_SEARCH_PACING
+
+
+async def sleep_random_ms(delay_range: tuple[int, int]) -> None:
+    lower, upper = delay_range
+    if upper <= 0:
+        return
+    await asyncio.sleep(random.uniform(max(0, lower), max(lower, upper)) / 1000)
+
+
+async def scroll_search_results(page, pacing: SearchPacing) -> None:
+    if not pacing.incremental_scroll:
+        await page.evaluate(
+            """async () => {
+              for (let index = 0; index < 4; index += 1) {
+                window.scrollTo(0, document.body.scrollHeight);
+                await new Promise((resolve) => setTimeout(resolve, 350));
+              }
+            }"""
+        )
+        return
+
+    for _ in range(max(0, pacing.scroll_steps)):
+        await page.evaluate(
+            """() => {
+              const viewport = window.innerHeight || document.documentElement.clientHeight || 800;
+              window.scrollBy(0, Math.max(320, Math.floor(viewport * 0.75)));
+            }"""
+        )
+        await sleep_random_ms(pacing.scroll_pause_ms)
 
 
 def build_search_extract_js(selectors: list[str]) -> str:
@@ -331,7 +391,12 @@ class SearchService:
 
         adapter = ADAPTERS[selected]
         search_url = adapter.build_url(keyword, page=page)
-        raw_payload = await self._evaluate_search(search_url, adapter.build_extract_js(), adapter.selectors)
+        raw_payload = await self._evaluate_search(
+            search_url,
+            adapter.build_extract_js(),
+            adapter.selectors,
+            engine=selected,
+        )
         if isinstance(raw_payload, dict):
             raw_rows = raw_payload.get("rows")
             total_pages = int(raw_payload.get("totalPages") or 1)
@@ -356,7 +421,28 @@ class SearchService:
             debug=debug if not rows else None,
         )
 
-    async def _evaluate_search(self, url: str, extract_js: str, selectors: list[str]) -> object:
+    async def _evaluate_search(
+        self,
+        url: str,
+        extract_js: str,
+        selectors: list[str],
+        *,
+        engine: SearchEngine | None = None,
+    ) -> object:
+        pacing = pacing_for_engine(engine)
+        lock = GOOGLE_SEARCH_LOCK if engine == "google" else None
+        if lock:
+            async with lock:
+                return await self._evaluate_search_with_pacing(url, extract_js, selectors, pacing)
+        return await self._evaluate_search_with_pacing(url, extract_js, selectors, pacing)
+
+    async def _evaluate_search_with_pacing(
+        self,
+        url: str,
+        extract_js: str,
+        selectors: list[str],
+        pacing: SearchPacing,
+    ) -> object:
         browser = None
         context = None
         try:
@@ -366,27 +452,22 @@ class SearchService:
                 page = await context.new_page()
                 page.set_default_navigation_timeout(self.browser.settings.navigation_timeout_ms)
                 page.set_default_timeout(self.browser.settings.navigation_timeout_ms)
+                await sleep_random_ms(pacing.pre_navigation_delay_ms)
                 await page.goto(
                     url,
                     wait_until="domcontentloaded",
                     timeout=self.browser.settings.navigation_timeout_ms,
                 )
+                await sleep_random_ms(pacing.post_navigation_delay_ms)
                 selector = ", ".join(selectors)
                 try:
                     await page.wait_for_selector(
                         selector,
-                        timeout=min(10_000, self.browser.settings.navigation_timeout_ms),
+                        timeout=min(pacing.selector_timeout_ms, self.browser.settings.navigation_timeout_ms),
                     )
                 except PlaywrightError:
                     pass
-                await page.evaluate(
-                    """async () => {
-                      for (let index = 0; index < 4; index += 1) {
-                        window.scrollTo(0, document.body.scrollHeight);
-                        await new Promise((resolve) => setTimeout(resolve, 350));
-                      }
-                    }"""
-                )
+                await scroll_search_results(page, pacing)
                 rows = []
                 deadline = asyncio.get_running_loop().time() + min(
                     10,
@@ -396,7 +477,7 @@ class SearchService:
                     rows = await page.evaluate(extract_js)
                     if rows:
                         break
-                    await asyncio.sleep(0.5)
+                    await sleep_random_ms(pacing.poll_interval_ms)
                 if rows:
                     return rows
                 return {
@@ -421,7 +502,12 @@ class SearchService:
 
         adapter = IMAGE_ADAPTERS[selected]
         search_url = adapter.build_url(keyword, page=page)
-        raw_payload = await self._evaluate_search(search_url, adapter.build_extract_js(), adapter.selectors)
+        raw_payload = await self._evaluate_search(
+            search_url,
+            adapter.build_extract_js(),
+            adapter.selectors,
+            engine=selected,
+        )
         if isinstance(raw_payload, dict):
             raw_rows = raw_payload.get("images")
             total_pages = int(raw_payload.get("totalPages") or 1)

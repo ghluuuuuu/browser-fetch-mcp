@@ -1,6 +1,6 @@
 from playwright.async_api import Error as PlaywrightError
 
-from obscura_web_fetch_mcp.playwright_utils import close_quietly
+from browser_fetch_mcp.playwright_utils import close_quietly
 
 
 class BrokenResource:

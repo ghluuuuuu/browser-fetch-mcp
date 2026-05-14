@@ -19,7 +19,7 @@ The system SHALL provide a Python 3.13 MCP server that exposes SSE mode and stre
 - **THEN** clients SHALL be able to connect through the streamable HTTP endpoint and the SSE endpoint without restarting the service or changing configuration
 
 ### Requirement: Service MUST load runtime configuration
-The system SHALL load runtime configuration for the Obscura CDP endpoint, MCP host, MCP port, navigation timeout, batch concurrency, default search engine, and default result limits from configuration files and environment variables. Environment variables SHALL override file defaults. Transport selection configuration SHALL NOT disable either SSE or streamable HTTP endpoints.
+The system SHALL load runtime configuration for the browser CDP endpoint, MCP host, MCP port, navigation timeout, batch concurrency, default search engine, and default result limits from configuration files and environment variables. Environment variables SHALL override file defaults. Transport selection configuration SHALL NOT disable either SSE or streamable HTTP endpoints.
 
 #### Scenario: Environment overrides config file
 - **WHEN** a CDP endpoint is defined in both the configuration file and the `CDP_ENDPOINT` environment variable
@@ -30,7 +30,7 @@ The system SHALL load runtime configuration for the Obscura CDP endpoint, MCP ho
 - **THEN** the service SHALL still expose both the streamable HTTP endpoint and the SSE endpoint
 
 ### Requirement: Fetch tool MUST retrieve rendered page content
-The system SHALL provide a `fetch` MCP tool that accepts `url`, `start_index`, `max_length`, and optional `exec_js`. The tool SHALL open the URL through the configured Obscura CDP server, wait for navigation, wait for rendered page content to become available when it is populated after initial navigation, evaluate JavaScript when requested, and return sliced content beginning at `start_index` with at most `max_length` characters.
+The system SHALL provide a `fetch` MCP tool that accepts `url`, `start_index`, `max_length`, and optional `exec_js`. The tool SHALL open the URL through the configured browser CDP server, wait for navigation, wait for rendered page content to become available when it is populated after initial navigation, evaluate JavaScript when requested, and return sliced content beginning at `start_index` with at most `max_length` characters.
 
 #### Scenario: Fetch default text content
 - **WHEN** a caller invokes `fetch` with a URL and no `exec_js`
@@ -53,7 +53,7 @@ The system SHALL provide a `fetch` MCP tool that accepts `url`, `start_index`, `
 - **THEN** the service SHALL return a bounded result or clear error without waiting indefinitely
 
 ### Requirement: Batch fetch tool MUST process multiple URLs
-The system SHALL provide a `batch-fetch` MCP tool that accepts `urls`, `start_index`, `max_length`, and optional `exec_js`. The tool SHALL fetch all URLs through Obscura CDP with bounded concurrency, wait for rendered page content for each URL using the same behavior as `fetch`, and return one result per input URL in input order.
+The system SHALL provide a `batch-fetch` MCP tool that accepts `urls`, `start_index`, `max_length`, and optional `exec_js`. The tool SHALL fetch all URLs through browser CDP with bounded concurrency, wait for rendered page content for each URL using the same behavior as `fetch`, and return one result per input URL in input order.
 
 #### Scenario: Batch fetch preserves order
 - **WHEN** a caller invokes `batch-fetch` with three URLs
@@ -82,8 +82,8 @@ The system SHALL provide a `search` MCP tool that accepts a keyword and supports
 - **WHEN** a caller invokes `search` with an unsupported engine name
 - **THEN** the service SHALL return a validation error before navigating any page
 
-### Requirement: CDP client MUST use Obscura through Playwright
-The system SHALL use Playwright's CDP connection support to connect to the configured Obscura CDP server and perform page navigation, JavaScript evaluation, and content extraction.
+### Requirement: CDP client MUST use Playwright over CDP
+The system SHALL use Playwright's CDP connection support to connect to the configured browser CDP server and perform page navigation, JavaScript evaluation, and content extraction.
 
 #### Scenario: CDP endpoint unavailable
 - **WHEN** the configured CDP endpoint is unreachable

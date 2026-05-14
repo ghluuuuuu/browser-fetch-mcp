@@ -3,9 +3,9 @@ requires = ["hatchling>=1.26"]
 build-backend = "hatchling.build"
 
 [project]
-name = "obscura-web-fetch-mcp"
+name = "browser-fetch-mcp"
 version = "0.1.0"
-description = "MCP web fetch service backed by an Obscura CDP endpoint."
+description = "MCP web fetch service backed by a browser CDP endpoint."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -25,10 +25,10 @@ dev = [
 ]
 
 [project.scripts]
-obscura-web-fetch-mcp = "obscura_web_fetch_mcp.__main__:main"
+browser-fetch-mcp = "browser_fetch_mcp.__main__:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/obscura_web_fetch_mcp"]
+packages = ["src/browser_fetch_mcp"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

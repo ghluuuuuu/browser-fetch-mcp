@@ -1,12 +1,12 @@
-from obscura_web_fetch_mcp.browser import (
+from browser_fetch_mcp.browser import (
     BrowserClient,
     PAGE_ASSETS_JS,
     RenderedContentSignal,
     auto_scroll_page,
     wait_for_rendered_content,
 )
-from obscura_web_fetch_mcp.config import Settings
-from obscura_web_fetch_mcp.models import make_fetch_result
+from browser_fetch_mcp.config import Settings
+from browser_fetch_mcp.models import make_fetch_result
 
 
 class FakeProbePage:

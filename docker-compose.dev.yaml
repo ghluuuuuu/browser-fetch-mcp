@@ -1,6 +1,8 @@
 services:
   chromote:
-    image: ${CHROMOTE_IMAGE:-ghcr.io/ghluuuuuu/browser-fetch-mcp-chromote:latest}
+    build:
+      context: ./vendor/chromote
+    image: browser-fetch-mcp-chromote
     restart: always
     environment:
       VNCPASS: ${VNCPASS:-P4ssw0rd!}
@@ -19,7 +21,9 @@ services:
       start_period: 30s
 
   web-fetch-mcp:
-    image: ${BROWSER_FETCH_MCP_IMAGE:-ghcr.io/ghluuuuuu/browser-fetch-mcp:latest}
+    build:
+      context: .
+    image: browser-fetch-mcp-service
     restart: always
     depends_on:
       - chromote

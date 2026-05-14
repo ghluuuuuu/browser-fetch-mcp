@@ -1,6 +1,6 @@
-# Obscura Web Fetch MCP
+# Browser Fetch MCP
 
-Python 3.13 MCP service that fetches rendered pages through an Obscura CDP endpoint.
+Python 3.13 MCP service that fetches rendered pages through a browser CDP endpoint.
 
 ## Tools
 
@@ -13,7 +13,7 @@ Python 3.13 MCP service that fetches rendered pages through an Obscura CDP endpo
 ```powershell
 python -m pip install -e .[dev]
 $env:CDP_ENDPOINT = "ws://127.0.0.1:9222"
-obscura-web-fetch-mcp
+browser-fetch-mcp
 ```
 
 The service exposes streamable HTTP at `/mcp` and SSE at `/sse` from the same running process.
@@ -36,8 +36,29 @@ Defaults are loaded from `config.example.yaml`. Environment variables override f
 ## Docker
 
 ```powershell
-docker build -t obscura-web-fetch-mcp .
-docker run --rm -p 8000:8000 -e CDP_ENDPOINT=ws://host.docker.internal:9222 obscura-web-fetch-mcp
+docker build -t browser-fetch-mcp .
+docker run --rm -p 8000:8000 -e CDP_ENDPOINT=ws://host.docker.internal:9222 browser-fetch-mcp
 ```
 
-The image does not bundle Obscura or a browser. Run Obscura separately and pass its CDP endpoint with `CDP_ENDPOINT`.
+The image does not bundle a browser. Run Chrome, Chromium, or another compatible CDP server separately and pass its endpoint with `CDP_ENDPOINT`.
+
+## Docker Compose
+
+Use the published GHCR images for deployment:
+
+```powershell
+docker compose up -d
+```
+
+Use the development compose file to build images locally:
+
+```powershell
+docker compose -f docker-compose.dev.yaml up -d --build
+```
+
+The deployment compose file uses these images by default:
+
+- `ghcr.io/ghluuuuuu/browser-fetch-mcp:latest`
+- `ghcr.io/ghluuuuuu/browser-fetch-mcp-chromote:latest`
+
+Set `BROWSER_FETCH_MCP_IMAGE` or `CHROMOTE_IMAGE` to deploy a specific image tag.

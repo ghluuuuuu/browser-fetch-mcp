@@ -1,6 +1,6 @@
 import pytest
 
-from obscura_web_fetch_mcp.models import (
+from browser_fetch_mcp.models import (
     make_fetch_result,
     slice_content,
     stringify_page_value,
