@@ -17,31 +17,8 @@ from .models import ImageSearchItem, ImageSearchResult, SearchResult, SearchRow
 from .playwright_utils import close_quietly
 
 
-GOOGLE_SEARCH_LOCK = asyncio.Lock()
-HOMEPAGE_INTERACTION_ENGINES = {"google", "bing"}
-GOOGLE_HOME_URL = "https://www.google.com/"
+HOMEPAGE_INTERACTION_ENGINES = {"bing"}
 BING_HOME_URL = "https://www.bing.com/"
-GOOGLE_SEARCH_INPUT_SELECTORS = [
-    'textarea[name="q"]',
-    'input[name="q"]',
-    'textarea[title="Search"]',
-    'input[title="Search"]',
-    'textarea[aria-label="Search"]',
-    'input[aria-label="Search"]',
-]
-GOOGLE_SEARCH_BUTTON_SELECTORS = [
-    'input[name="btnK"]',
-    'button[aria-label="Google Search"]',
-    'input[aria-label="Google Search"]',
-]
-GOOGLE_IMAGES_TAB_SELECTORS = [
-    'a[href*="tbm=isch"]',
-    'a[href*="udm=2"]',
-    'a[aria-label*="Images"]',
-    'a:has-text("Images")',
-    'a:has-text("图片")',
-    'a:has-text("圖片")',
-]
 BING_SEARCH_INPUT_SELECTORS = [
     'textarea[name="q"]',
     'input[name="q"]',
@@ -65,19 +42,15 @@ BING_IMAGES_TAB_SELECTORS = [
     'a:has-text("圖片")',
 ]
 SEARCH_HOME_URLS = {
-    "google": GOOGLE_HOME_URL,
     "bing": BING_HOME_URL,
 }
 SEARCH_INPUT_SELECTORS = {
-    "google": GOOGLE_SEARCH_INPUT_SELECTORS,
     "bing": BING_SEARCH_INPUT_SELECTORS,
 }
 SEARCH_BUTTON_SELECTORS = {
-    "google": GOOGLE_SEARCH_BUTTON_SELECTORS,
     "bing": BING_SEARCH_BUTTON_SELECTORS,
 }
 IMAGE_TAB_SELECTORS = {
-    "google": GOOGLE_IMAGES_TAB_SELECTORS,
     "bing": BING_IMAGES_TAB_SELECTORS,
 }
 
@@ -91,24 +64,13 @@ class SearchPacing:
     scroll_pause_ms: tuple[int, int] = (350, 350)
     poll_interval_ms: tuple[int, int] = (500, 500)
     incremental_scroll: bool = False
-    input_delay_ms: tuple[int, int] = (30, 90)
 
 
 DEFAULT_SEARCH_PACING = SearchPacing()
-GOOGLE_SEARCH_PACING = SearchPacing(
-    pre_navigation_delay_ms=(900, 1_800),
-    post_navigation_delay_ms=(1_200, 2_400),
-    selector_timeout_ms=15_000,
-    scroll_steps=5,
-    scroll_pause_ms=(700, 1_300),
-    poll_interval_ms=(900, 1_500),
-    incremental_scroll=True,
-    input_delay_ms=(70, 180),
-)
 
 
 def pacing_for_engine(engine: SearchEngine | None) -> SearchPacing:
-    return GOOGLE_SEARCH_PACING if engine == "google" else DEFAULT_SEARCH_PACING
+    return DEFAULT_SEARCH_PACING
 
 
 async def sleep_random_ms(delay_range: tuple[int, int]) -> None:
@@ -151,18 +113,13 @@ async def find_first_visible_locator(page, selectors: list[str]):
     return None
 
 
-async def type_like_user(locator, text: str, pacing: SearchPacing) -> None:
+async def fill_search_input(locator, text: str, pacing: SearchPacing) -> None:
     try:
         await locator.click()
     except PlaywrightError:
         await locator.focus()
     await sleep_random_ms(pacing.poll_interval_ms)
-    try:
-        await locator.fill("")
-    except PlaywrightError:
-        pass
-    for character in text:
-        await locator.type(character, delay=random.randint(*pacing.input_delay_ms))
+    await locator.fill(text)
 
 
 async def submit_home_search(page, engine: SearchEngine, keyword: str, pacing: SearchPacing) -> None:
@@ -170,7 +127,7 @@ async def submit_home_search(page, engine: SearchEngine, keyword: str, pacing: S
     if input_locator is None:
         raise PlaywrightError(f"{engine} search input was not visible")
 
-    await type_like_user(input_locator, keyword, pacing)
+    await fill_search_input(input_locator, keyword, pacing)
     await sleep_random_ms(pacing.poll_interval_ms)
 
     button_locator = await find_first_visible_locator(page, SEARCH_BUTTON_SELECTORS[engine])
@@ -291,11 +248,30 @@ def build_image_extract_js(selectors: list[str]) -> str:
       return {};
     }
   };
+  const normalizeUrl = (rawUrl) => {
+    if (!rawUrl) return '';
+    const withProtocol = rawUrl.startsWith('//') ? `https:${rawUrl}` : rawUrl;
+    try {
+      return new URL(withProtocol, location.href).href;
+    } catch {
+      return withProtocol;
+    }
+  };
+  const findOuterAnchor = (node, img) => {
+    let current = img || node;
+    for (let depth = 0; current && depth < 8; depth += 1) {
+      if (current.matches?.('a[href]')) return current;
+      const nestedAnchor = current.querySelector?.('a[href]');
+      if (nestedAnchor) return nestedAnchor;
+      current = current.parentElement;
+    }
+    return node.matches?.('a[href]') ? node : node.closest?.('a[href]') || node.querySelector?.('a[href]') || null;
+  };
   for (const selector of selectors) {
     for (const node of document.querySelectorAll(selector)) {
       const img = node.matches?.('img') ? node : node.querySelector?.('img');
       const meta = readMeta(node.closest?.('[data-m], [m]') || node);
-      const anchor = node.matches?.('a[href]') ? node : node.closest?.('a[href]') || node.querySelector?.('a[href]');
+      const anchor = findOuterAnchor(node, img);
       const rawUrl = meta.murl || meta.imgurl || meta.ou || node.getAttribute('data-src') || img?.currentSrc || img?.src || '';
       const rawLinkUrl = meta.purl || meta.surl || meta.ru || anchor?.href || '';
       const name = (
@@ -309,8 +285,8 @@ def build_image_extract_js(selectors: list[str]) -> str:
       ).trim();
       const width = Number.parseInt(meta.w || meta.width || img?.naturalWidth || img?.width || 0, 10) || null;
       const height = Number.parseInt(meta.h || meta.height || img?.naturalHeight || img?.height || 0, 10) || null;
-      const url = rawUrl.startsWith('//') ? `https:${rawUrl}` : rawUrl;
-      const linkUrl = rawLinkUrl.startsWith('//') ? `https:${rawLinkUrl}` : rawLinkUrl;
+      const url = normalizeUrl(rawUrl);
+      const linkUrl = normalizeUrl(rawLinkUrl);
       if (!url || seen.has(url)) continue;
       if (!/^https?:\/\//i.test(url)) continue;
       seen.add(url);
@@ -594,19 +570,6 @@ class SearchService:
         image_search: bool = False,
     ) -> object:
         pacing = pacing_for_engine(engine)
-        lock = GOOGLE_SEARCH_LOCK if engine == "google" else None
-        if lock:
-            async with lock:
-                return await self._evaluate_search_with_pacing(
-                    url,
-                    extract_js,
-                    selectors,
-                    pacing,
-                    engine=engine,
-                    keyword=keyword,
-                    page=page,
-                    image_search=image_search,
-                )
         return await self._evaluate_search_with_pacing(
             url,
             extract_js,

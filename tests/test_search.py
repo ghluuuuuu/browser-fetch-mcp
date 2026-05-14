@@ -177,14 +177,14 @@ def test_image_extract_js_reads_image_metadata() -> None:
     assert "height" in script
 
 
-def test_google_search_uses_slower_pacing() -> None:
+def test_google_search_uses_default_pacing() -> None:
     google = pacing_for_engine("google")
     bing = pacing_for_engine("bing")
 
-    assert google.incremental_scroll is True
-    assert google.pre_navigation_delay_ms[0] > bing.pre_navigation_delay_ms[0]
-    assert google.post_navigation_delay_ms[0] > bing.post_navigation_delay_ms[0]
-    assert google.poll_interval_ms[0] > bing.poll_interval_ms[0]
+    assert google == bing
+    assert google.incremental_scroll is False
+    assert google.pre_navigation_delay_ms == (0, 0)
+    assert google.post_navigation_delay_ms == (0, 0)
 
 
 class FakeSettings:
@@ -266,7 +266,7 @@ async def test_evaluate_search_retries_until_rows(monkeypatch) -> None:
     assert calls["evaluate"] == 2
 
 
-async def test_google_search_opens_homepage_and_submits_query(monkeypatch) -> None:
+async def test_google_search_opens_search_url_directly(monkeypatch) -> None:
     actions = []
 
     class FakeNavigation:
@@ -372,8 +372,6 @@ async def test_google_search_opens_homepage_and_submits_query(monkeypatch) -> No
 
     monkeypatch.setattr("browser_fetch_mcp.search.async_playwright", lambda: FakePlaywright())
     monkeypatch.setattr("browser_fetch_mcp.search.sleep_random_ms", lambda delay_range: _noop())
-    monkeypatch.setattr("browser_fetch_mcp.search.random.randint", lambda lower, upper: lower)
-
     service = SearchService(FakeBrowser())  # type: ignore[arg-type]
     payload = await service._evaluate_search(
         "https://www.google.com/search?q=hello+world",
@@ -384,15 +382,11 @@ async def test_google_search_opens_homepage_and_submits_query(monkeypatch) -> No
     )
 
     assert payload == {"rows": [{"title": "Result", "url": "https://example.com"}], "totalPages": 1}
-    assert actions[:2] == [
-        ("goto", "https://www.google.com/"),
-        ("click", 'textarea[name="q"]'),
-    ]
-    assert ("type", 'textarea[name="q"]', "h") in actions
-    assert ("click", 'input[name="btnK"]') in actions
+    assert ("goto", "https://www.google.com/search?q=hello+world") in actions
+    assert not any(action[0] in {"click", "fill", "type", "press"} for action in actions)
 
 
-async def test_google_image_search_clicks_images_tab(monkeypatch) -> None:
+async def test_google_image_search_opens_search_url_directly(monkeypatch) -> None:
     actions = []
 
     class FakeNavigation:
@@ -510,8 +504,6 @@ async def test_google_image_search_clicks_images_tab(monkeypatch) -> None:
 
     monkeypatch.setattr("browser_fetch_mcp.search.async_playwright", lambda: FakePlaywright())
     monkeypatch.setattr("browser_fetch_mcp.search.sleep_random_ms", lambda delay_range: _noop())
-    monkeypatch.setattr("browser_fetch_mcp.search.random.randint", lambda lower, upper: lower)
-
     service = SearchService(FakeBrowser())  # type: ignore[arg-type]
     payload = await service._evaluate_search(
         "https://www.google.com/search?tbm=isch&q=images",
@@ -523,8 +515,8 @@ async def test_google_image_search_clicks_images_tab(monkeypatch) -> None:
     )
 
     assert payload == {"images": [{"name": "Image", "url": "https://example.com/image.jpg"}], "totalPages": 1}
-    assert ("goto", "https://www.google.com/") in actions
-    assert ("click", 'a[href*="tbm=isch"]') in actions
+    assert ("goto", "https://www.google.com/search?tbm=isch&q=images") in actions
+    assert not any(action[0] == "click" for action in actions)
 
 
 async def test_bing_search_opens_homepage_and_submits_query(monkeypatch) -> None:
@@ -639,8 +631,6 @@ async def test_bing_search_opens_homepage_and_submits_query(monkeypatch) -> None
 
     monkeypatch.setattr("browser_fetch_mcp.search.async_playwright", lambda: FakePlaywright())
     monkeypatch.setattr("browser_fetch_mcp.search.sleep_random_ms", lambda delay_range: _noop())
-    monkeypatch.setattr("browser_fetch_mcp.search.random.randint", lambda lower, upper: lower)
-
     service = SearchService(FakeBrowser())  # type: ignore[arg-type]
     payload = await service._evaluate_search(
         "https://cn.bing.com/search?q=helloworld",
@@ -655,7 +645,8 @@ async def test_bing_search_opens_homepage_and_submits_query(monkeypatch) -> None
         ("goto", "https://www.bing.com/"),
         ("click", 'input[name="q"]'),
     ]
-    assert ("type", 'input[name="q"]', "h") in actions
+    assert ("fill", 'input[name="q"]', "hello world") in actions
+    assert not any(action[0] == "type" for action in actions)
     assert ("click", "#search_icon") in actions
 
 
@@ -777,7 +768,6 @@ async def test_bing_image_search_clicks_images_tab(monkeypatch) -> None:
 
     monkeypatch.setattr("browser_fetch_mcp.search.async_playwright", lambda: FakePlaywright())
     monkeypatch.setattr("browser_fetch_mcp.search.sleep_random_ms", lambda delay_range: _noop())
-    monkeypatch.setattr("browser_fetch_mcp.search.random.randint", lambda lower, upper: lower)
 
     service = SearchService(FakeBrowser())  # type: ignore[arg-type]
     payload = await service._evaluate_search(
@@ -935,7 +925,6 @@ async def test_bing_image_search_uses_popup_page(monkeypatch) -> None:
 
     monkeypatch.setattr("browser_fetch_mcp.search.async_playwright", lambda: FakePlaywright())
     monkeypatch.setattr("browser_fetch_mcp.search.sleep_random_ms", lambda delay_range: _noop())
-    monkeypatch.setattr("browser_fetch_mcp.search.random.randint", lambda lower, upper: lower)
 
     service = SearchService(FakeBrowser())  # type: ignore[arg-type]
     payload = await service._evaluate_search(
