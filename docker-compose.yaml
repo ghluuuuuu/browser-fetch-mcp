@@ -6,8 +6,6 @@ services:
       VNCPASS: ${VNCPASS:-P4ssw0rd!}
     ports:
       - "127.0.0.1:8080:8080"
-      - "127.0.0.1:9222:9222"
-      - "127.0.0.1:8000:8000"
     volumes:
       - chromote-data:/data
     shm_size: "1gb"
@@ -17,17 +15,30 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    networks:
+      browser-fetch-internal:
+        ipv4_address: 172.28.10.10
 
   web-fetch-mcp:
     image: ${BROWSER_FETCH_MCP_IMAGE:-ghcr.io/ghluuuuuu/browser-fetch-mcp:latest}
     restart: always
     depends_on:
       - chromote
-    network_mode: "service:chromote"
+    ports:
+      - "127.0.0.1:8000:8000"
     environment:
-      CDP_ENDPOINT: http://127.0.0.1:9222
+      CDP_ENDPOINT: http://172.28.10.10:9222
       MCP_HOST: 0.0.0.0
       MCP_PORT: 8000
+    networks:
+      - browser-fetch-internal
 
 volumes:
   chromote-data:
+
+networks:
+  browser-fetch-internal:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.10.0/24

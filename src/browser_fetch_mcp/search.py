@@ -17,7 +17,9 @@ from .playwright_utils import close_quietly
 
 
 GOOGLE_SEARCH_LOCK = asyncio.Lock()
+HOMEPAGE_INTERACTION_ENGINES = {"google", "bing"}
 GOOGLE_HOME_URL = "https://www.google.com/"
+BING_HOME_URL = "https://www.bing.com/"
 GOOGLE_SEARCH_INPUT_SELECTORS = [
     'textarea[name="q"]',
     'input[name="q"]',
@@ -39,6 +41,44 @@ GOOGLE_IMAGES_TAB_SELECTORS = [
     'a:has-text("图片")',
     'a:has-text("圖片")',
 ]
+BING_SEARCH_INPUT_SELECTORS = [
+    'textarea[name="q"]',
+    'input[name="q"]',
+    '#sb_form_q',
+    'textarea[aria-label="Enter your search term"]',
+    'input[aria-label="Enter your search term"]',
+    'textarea[aria-label="Search"]',
+    'input[aria-label="Search"]',
+]
+BING_SEARCH_BUTTON_SELECTORS = [
+    '#search_icon',
+    'input[type="submit"][value="Search"]',
+    'button[type="submit"]',
+    'label[for="sb_form_go"]',
+]
+BING_IMAGES_TAB_SELECTORS = [
+    'a[href*="/images/search"]',
+    'a[href*="scope=images"]',
+    'a:has-text("Images")',
+    'a:has-text("图片")',
+    'a:has-text("圖片")',
+]
+SEARCH_HOME_URLS = {
+    "google": GOOGLE_HOME_URL,
+    "bing": BING_HOME_URL,
+}
+SEARCH_INPUT_SELECTORS = {
+    "google": GOOGLE_SEARCH_INPUT_SELECTORS,
+    "bing": BING_SEARCH_INPUT_SELECTORS,
+}
+SEARCH_BUTTON_SELECTORS = {
+    "google": GOOGLE_SEARCH_BUTTON_SELECTORS,
+    "bing": BING_SEARCH_BUTTON_SELECTORS,
+}
+IMAGE_TAB_SELECTORS = {
+    "google": GOOGLE_IMAGES_TAB_SELECTORS,
+    "bing": BING_IMAGES_TAB_SELECTORS,
+}
 
 
 @dataclass(frozen=True)
@@ -124,15 +164,15 @@ async def type_like_user(locator, text: str, pacing: SearchPacing) -> None:
         await locator.type(character, delay=random.randint(*pacing.input_delay_ms))
 
 
-async def submit_google_home_search(page, keyword: str, pacing: SearchPacing) -> None:
-    input_locator = await find_first_visible_locator(page, GOOGLE_SEARCH_INPUT_SELECTORS)
+async def submit_home_search(page, engine: SearchEngine, keyword: str, pacing: SearchPacing) -> None:
+    input_locator = await find_first_visible_locator(page, SEARCH_INPUT_SELECTORS[engine])
     if input_locator is None:
-        raise PlaywrightError("Google search input was not visible")
+        raise PlaywrightError(f"{engine} search input was not visible")
 
     await type_like_user(input_locator, keyword, pacing)
     await sleep_random_ms(pacing.poll_interval_ms)
 
-    button_locator = await find_first_visible_locator(page, GOOGLE_SEARCH_BUTTON_SELECTORS)
+    button_locator = await find_first_visible_locator(page, SEARCH_BUTTON_SELECTORS[engine])
     if button_locator is not None:
         async with page.expect_navigation(wait_until="domcontentloaded"):
             await button_locator.click()
@@ -142,17 +182,27 @@ async def submit_google_home_search(page, keyword: str, pacing: SearchPacing) ->
         await input_locator.press("Enter")
 
 
-async def open_google_images_results(page, pacing: SearchPacing) -> None:
+async def open_image_results(page, engine: SearchEngine, target_url: str, pacing: SearchPacing):
     await sleep_random_ms(pacing.poll_interval_ms)
-    images_tab = await find_first_visible_locator(page, GOOGLE_IMAGES_TAB_SELECTORS)
+    images_tab = await find_first_visible_locator(page, IMAGE_TAB_SELECTORS[engine])
     if images_tab is None:
-        current_url = page.url
-        separator = "&" if "?" in current_url else "?"
-        await page.goto(f"{current_url}{separator}tbm=isch", wait_until="domcontentloaded")
-        return
+        await page.goto(target_url, wait_until="domcontentloaded")
+        return page
+
+    if engine == "bing":
+        try:
+            async with page.expect_popup(timeout=5_000) as popup_info:
+                await images_tab.click()
+            popup_page = await popup_info.value
+            await popup_page.wait_for_load_state("domcontentloaded")
+            return popup_page
+        except PlaywrightError:
+            if is_image_results_url(engine, page.url):
+                return page
 
     async with page.expect_navigation(wait_until="domcontentloaded"):
         await images_tab.click()
+    return page
 
 
 def google_result_page_index(url: str) -> int:
@@ -167,6 +217,20 @@ def google_result_page_index(url: str) -> int:
 def is_google_images_url(url: str) -> bool:
     params = parse_qs(urlparse(url).query)
     return params.get("tbm") == ["isch"] or params.get("udm") == ["2"]
+
+
+def is_bing_images_url(url: str) -> bool:
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query)
+    return "/images/search" in parsed.path or params.get("scope") == ["images"]
+
+
+def is_image_results_url(engine: SearchEngine, url: str) -> bool:
+    if engine == "google":
+        return is_google_images_url(url)
+    if engine == "bing":
+        return is_bing_images_url(url)
+    return False
 
 
 def build_search_extract_js(selectors: list[str]) -> str:
@@ -575,9 +639,10 @@ class SearchService:
                 browser_page.set_default_navigation_timeout(self.browser.settings.navigation_timeout_ms)
                 browser_page.set_default_timeout(self.browser.settings.navigation_timeout_ms)
                 await sleep_random_ms(pacing.pre_navigation_delay_ms)
-                if engine == "google" and keyword:
-                    await self._navigate_google_home_search(
+                if engine in HOMEPAGE_INTERACTION_ENGINES and keyword:
+                    browser_page = await self._navigate_home_search(
                         browser_page,
+                        engine,
                         keyword,
                         url,
                         page,
@@ -625,25 +690,26 @@ class SearchService:
             await close_quietly(context)
             await close_quietly(browser)
 
-    async def _navigate_google_home_search(
+    async def _navigate_home_search(
         self,
         page,
+        engine: SearchEngine,
         keyword: str,
         target_url: str,
         target_page: int,
         image_search: bool,
         pacing: SearchPacing,
-    ) -> None:
+    ):
         await page.goto(
-            GOOGLE_HOME_URL,
+            SEARCH_HOME_URLS[engine],
             wait_until="domcontentloaded",
             timeout=self.browser.settings.navigation_timeout_ms,
         )
         await sleep_random_ms(pacing.post_navigation_delay_ms)
-        await submit_google_home_search(page, keyword, pacing)
+        await submit_home_search(page, engine, keyword, pacing)
         await sleep_random_ms(pacing.post_navigation_delay_ms)
-        if image_search and not is_google_images_url(page.url):
-            await open_google_images_results(page, pacing)
+        if image_search and not is_image_results_url(engine, page.url):
+            page = await open_image_results(page, engine, target_url, pacing)
             await sleep_random_ms(pacing.post_navigation_delay_ms)
         current_page = google_result_page_index(page.url)
         if target_page > 1 and current_page != target_page:
@@ -652,6 +718,7 @@ class SearchService:
                 wait_until="domcontentloaded",
                 timeout=self.browser.settings.navigation_timeout_ms,
             )
+        return page
 
     async def search_img(self, keyword: str, engine: str | None = None, page: int = 1) -> ImageSearchResult:
         if not keyword.strip():

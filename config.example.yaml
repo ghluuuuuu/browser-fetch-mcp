@@ -3,6 +3,6 @@ host: 0.0.0.0
 port: 8000
 navigation_timeout_ms: 30000
 batch_concurrency: 3
-default_search_engine: baidu
+default_search_engine: bing
 default_search_limit: 10
 max_content_length: 20000
