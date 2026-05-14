@@ -257,8 +257,260 @@ async def test_evaluate_search_retries_until_rows(monkeypatch) -> None:
     assert calls["evaluate"] == 2
 
 
+async def test_google_search_opens_homepage_and_submits_query(monkeypatch) -> None:
+    actions = []
+
+    class FakeNavigation:
+        async def __aenter__(self):
+            actions.append(("expect_navigation",))
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    class FakeLocator:
+        def __init__(self, page, selector):
+            self.page = page
+            self.selector = selector
+            self.first = self
+
+        async def count(self):
+            return 1 if self.selector == 'textarea[name="q"]' or self.selector == 'input[name="btnK"]' else 0
+
+        async def is_visible(self):
+            return True
+
+        async def click(self):
+            actions.append(("click", self.selector))
+            if self.selector == 'input[name="btnK"]':
+                self.page.url = "https://www.google.com/search?q=hello+world"
+
+        async def focus(self):
+            actions.append(("focus", self.selector))
+
+        async def fill(self, value):
+            actions.append(("fill", self.selector, value))
+
+        async def type(self, value, delay=0):
+            actions.append(("type", self.selector, value))
+
+        async def press(self, key):
+            actions.append(("press", self.selector, key))
+            self.page.url = "https://www.google.com/search?q=hello+world"
+
+    class FakePage:
+        url = "about:blank"
+
+        def set_default_navigation_timeout(self, timeout):
+            pass
+
+        def set_default_timeout(self, timeout):
+            pass
+
+        def locator(self, selector):
+            return FakeLocator(self, selector)
+
+        def expect_navigation(self, **kwargs):
+            return FakeNavigation()
+
+        async def goto(self, url, *args, **kwargs):
+            actions.append(("goto", url))
+            self.url = url
+
+        async def wait_for_selector(self, *args, **kwargs):
+            return None
+
+        async def evaluate(self, expression):
+            if "window.scrollBy" in expression:
+                return None
+            return {
+                "rows": [{"title": "Result", "url": "https://example.com"}],
+                "totalPages": 1,
+            }
+
+        async def title(self):
+            return ""
+
+    class FakeContext:
+        async def new_page(self):
+            return FakePage()
+
+        async def close(self):
+            return None
+
+    class FakeChromium:
+        async def connect_over_cdp(self, endpoint):
+            return FakeBrowserConnection()
+
+    class FakeBrowserConnection:
+        async def new_context(self):
+            return FakeContext()
+
+        async def close(self):
+            return None
+
+    class FakePlaywright:
+        chromium = FakeChromium()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    monkeypatch.setattr("browser_fetch_mcp.search.async_playwright", lambda: FakePlaywright())
+    monkeypatch.setattr("browser_fetch_mcp.search.sleep_random_ms", lambda delay_range: _noop())
+    monkeypatch.setattr("browser_fetch_mcp.search.random.randint", lambda lower, upper: lower)
+
+    service = SearchService(FakeBrowser())  # type: ignore[arg-type]
+    payload = await service._evaluate_search(
+        "https://www.google.com/search?q=hello+world",
+        "() => []",
+        ["#search a[href] h3"],
+        engine="google",
+        keyword="hello world",
+    )
+
+    assert payload == {"rows": [{"title": "Result", "url": "https://example.com"}], "totalPages": 1}
+    assert actions[:2] == [
+        ("goto", "https://www.google.com/"),
+        ("click", 'textarea[name="q"]'),
+    ]
+    assert ("type", 'textarea[name="q"]', "h") in actions
+    assert ("click", 'input[name="btnK"]') in actions
+
+
+async def test_google_image_search_clicks_images_tab(monkeypatch) -> None:
+    actions = []
+
+    class FakeNavigation:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    class FakeLocator:
+        def __init__(self, page, selector):
+            self.page = page
+            self.selector = selector
+            self.first = self
+
+        async def count(self):
+            visible_selectors = {
+                'textarea[name="q"]',
+                'input[name="btnK"]',
+                'a[href*="tbm=isch"]',
+            }
+            return 1 if self.selector in visible_selectors else 0
+
+        async def is_visible(self):
+            return True
+
+        async def click(self):
+            actions.append(("click", self.selector))
+            if self.selector == 'input[name="btnK"]':
+                self.page.url = "https://www.google.com/search?q=images"
+            if self.selector == 'a[href*="tbm=isch"]':
+                self.page.url = "https://www.google.com/search?q=images&tbm=isch"
+
+        async def focus(self):
+            pass
+
+        async def fill(self, value):
+            pass
+
+        async def type(self, value, delay=0):
+            pass
+
+        async def press(self, key):
+            pass
+
+    class FakePage:
+        url = "about:blank"
+
+        def set_default_navigation_timeout(self, timeout):
+            pass
+
+        def set_default_timeout(self, timeout):
+            pass
+
+        def locator(self, selector):
+            return FakeLocator(self, selector)
+
+        def expect_navigation(self, **kwargs):
+            return FakeNavigation()
+
+        async def goto(self, url, *args, **kwargs):
+            actions.append(("goto", url))
+            self.url = url
+
+        async def wait_for_selector(self, *args, **kwargs):
+            return None
+
+        async def evaluate(self, expression):
+            if "window.scrollBy" in expression:
+                return None
+            return {
+                "images": [{"name": "Image", "url": "https://example.com/image.jpg"}],
+                "totalPages": 1,
+            }
+
+        async def title(self):
+            return ""
+
+    class FakeContext:
+        async def new_page(self):
+            return FakePage()
+
+        async def close(self):
+            return None
+
+    class FakeChromium:
+        async def connect_over_cdp(self, endpoint):
+            return FakeBrowserConnection()
+
+    class FakeBrowserConnection:
+        async def new_context(self):
+            return FakeContext()
+
+        async def close(self):
+            return None
+
+    class FakePlaywright:
+        chromium = FakeChromium()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    monkeypatch.setattr("browser_fetch_mcp.search.async_playwright", lambda: FakePlaywright())
+    monkeypatch.setattr("browser_fetch_mcp.search.sleep_random_ms", lambda delay_range: _noop())
+    monkeypatch.setattr("browser_fetch_mcp.search.random.randint", lambda lower, upper: lower)
+
+    service = SearchService(FakeBrowser())  # type: ignore[arg-type]
+    payload = await service._evaluate_search(
+        "https://www.google.com/search?tbm=isch&q=images",
+        "() => []",
+        ["img[src]"],
+        engine="google",
+        keyword="images",
+        image_search=True,
+    )
+
+    assert payload == {"images": [{"name": "Image", "url": "https://example.com/image.jpg"}], "totalPages": 1}
+    assert ("goto", "https://www.google.com/") in actions
+    assert ("click", 'a[href*="tbm=isch"]') in actions
+
+
+async def _noop() -> None:
+    return None
+
+
 async def test_search_returns_page_metadata(monkeypatch) -> None:
-    async def fake_evaluate_search(self, url, extract_js, selectors, *, engine=None):
+    async def fake_evaluate_search(self, url, extract_js, selectors, *, engine=None, **kwargs):
         assert url.endswith("&first=21")
         assert engine == "bing"
         return {
@@ -277,7 +529,7 @@ async def test_search_returns_page_metadata(monkeypatch) -> None:
 
 
 async def test_search_img_returns_image_metadata(monkeypatch) -> None:
-    async def fake_evaluate_search(self, url, extract_js, selectors, *, engine=None):
+    async def fake_evaluate_search(self, url, extract_js, selectors, *, engine=None, **kwargs):
         assert "/images/search" in url
         assert engine == "bing"
         return {

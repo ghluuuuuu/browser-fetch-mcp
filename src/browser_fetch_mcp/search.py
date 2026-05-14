@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import json
 import random
 import re
-from urllib.parse import quote, quote_plus
+from urllib.parse import parse_qs, quote, quote_plus, urlparse
 
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import async_playwright
@@ -17,6 +17,28 @@ from .playwright_utils import close_quietly
 
 
 GOOGLE_SEARCH_LOCK = asyncio.Lock()
+GOOGLE_HOME_URL = "https://www.google.com/"
+GOOGLE_SEARCH_INPUT_SELECTORS = [
+    'textarea[name="q"]',
+    'input[name="q"]',
+    'textarea[title="Search"]',
+    'input[title="Search"]',
+    'textarea[aria-label="Search"]',
+    'input[aria-label="Search"]',
+]
+GOOGLE_SEARCH_BUTTON_SELECTORS = [
+    'input[name="btnK"]',
+    'button[aria-label="Google Search"]',
+    'input[aria-label="Google Search"]',
+]
+GOOGLE_IMAGES_TAB_SELECTORS = [
+    'a[href*="tbm=isch"]',
+    'a[href*="udm=2"]',
+    'a[aria-label*="Images"]',
+    'a:has-text("Images")',
+    'a:has-text("图片")',
+    'a:has-text("圖片")',
+]
 
 
 @dataclass(frozen=True)
@@ -28,6 +50,7 @@ class SearchPacing:
     scroll_pause_ms: tuple[int, int] = (350, 350)
     poll_interval_ms: tuple[int, int] = (500, 500)
     incremental_scroll: bool = False
+    input_delay_ms: tuple[int, int] = (30, 90)
 
 
 DEFAULT_SEARCH_PACING = SearchPacing()
@@ -39,6 +62,7 @@ GOOGLE_SEARCH_PACING = SearchPacing(
     scroll_pause_ms=(700, 1_300),
     poll_interval_ms=(900, 1_500),
     incremental_scroll=True,
+    input_delay_ms=(70, 180),
 )
 
 
@@ -73,6 +97,76 @@ async def scroll_search_results(page, pacing: SearchPacing) -> None:
             }"""
         )
         await sleep_random_ms(pacing.scroll_pause_ms)
+
+
+async def find_first_visible_locator(page, selectors: list[str]):
+    for selector in selectors:
+        locator = page.locator(selector).first
+        try:
+            if await locator.count() > 0 and await locator.is_visible():
+                return locator
+        except PlaywrightError:
+            continue
+    return None
+
+
+async def type_like_user(locator, text: str, pacing: SearchPacing) -> None:
+    try:
+        await locator.click()
+    except PlaywrightError:
+        await locator.focus()
+    await sleep_random_ms(pacing.poll_interval_ms)
+    try:
+        await locator.fill("")
+    except PlaywrightError:
+        pass
+    for character in text:
+        await locator.type(character, delay=random.randint(*pacing.input_delay_ms))
+
+
+async def submit_google_home_search(page, keyword: str, pacing: SearchPacing) -> None:
+    input_locator = await find_first_visible_locator(page, GOOGLE_SEARCH_INPUT_SELECTORS)
+    if input_locator is None:
+        raise PlaywrightError("Google search input was not visible")
+
+    await type_like_user(input_locator, keyword, pacing)
+    await sleep_random_ms(pacing.poll_interval_ms)
+
+    button_locator = await find_first_visible_locator(page, GOOGLE_SEARCH_BUTTON_SELECTORS)
+    if button_locator is not None:
+        async with page.expect_navigation(wait_until="domcontentloaded"):
+            await button_locator.click()
+        return
+
+    async with page.expect_navigation(wait_until="domcontentloaded"):
+        await input_locator.press("Enter")
+
+
+async def open_google_images_results(page, pacing: SearchPacing) -> None:
+    await sleep_random_ms(pacing.poll_interval_ms)
+    images_tab = await find_first_visible_locator(page, GOOGLE_IMAGES_TAB_SELECTORS)
+    if images_tab is None:
+        current_url = page.url
+        separator = "&" if "?" in current_url else "?"
+        await page.goto(f"{current_url}{separator}tbm=isch", wait_until="domcontentloaded")
+        return
+
+    async with page.expect_navigation(wait_until="domcontentloaded"):
+        await images_tab.click()
+
+
+def google_result_page_index(url: str) -> int:
+    params = parse_qs(urlparse(url).query)
+    start = params.get("start", ["0"])[0]
+    try:
+        return max(1, int(start) // 10 + 1)
+    except ValueError:
+        return 1
+
+
+def is_google_images_url(url: str) -> bool:
+    params = parse_qs(urlparse(url).query)
+    return params.get("tbm") == ["isch"] or params.get("udm") == ["2"]
 
 
 def build_search_extract_js(selectors: list[str]) -> str:
@@ -396,6 +490,8 @@ class SearchService:
             adapter.build_extract_js(),
             adapter.selectors,
             engine=selected,
+            keyword=keyword,
+            page=page,
         )
         if isinstance(raw_payload, dict):
             raw_rows = raw_payload.get("rows")
@@ -428,13 +524,34 @@ class SearchService:
         selectors: list[str],
         *,
         engine: SearchEngine | None = None,
+        keyword: str | None = None,
+        page: int = 1,
+        image_search: bool = False,
     ) -> object:
         pacing = pacing_for_engine(engine)
         lock = GOOGLE_SEARCH_LOCK if engine == "google" else None
         if lock:
             async with lock:
-                return await self._evaluate_search_with_pacing(url, extract_js, selectors, pacing)
-        return await self._evaluate_search_with_pacing(url, extract_js, selectors, pacing)
+                return await self._evaluate_search_with_pacing(
+                    url,
+                    extract_js,
+                    selectors,
+                    pacing,
+                    engine=engine,
+                    keyword=keyword,
+                    page=page,
+                    image_search=image_search,
+                )
+        return await self._evaluate_search_with_pacing(
+            url,
+            extract_js,
+            selectors,
+            pacing,
+            engine=engine,
+            keyword=keyword,
+            page=page,
+            image_search=image_search,
+        )
 
     async def _evaluate_search_with_pacing(
         self,
@@ -442,6 +559,11 @@ class SearchService:
         extract_js: str,
         selectors: list[str],
         pacing: SearchPacing,
+        *,
+        engine: SearchEngine | None = None,
+        keyword: str | None = None,
+        page: int = 1,
+        image_search: bool = False,
     ) -> object:
         browser = None
         context = None
@@ -449,32 +571,42 @@ class SearchService:
             async with async_playwright() as playwright:
                 browser = await playwright.chromium.connect_over_cdp(self.browser.settings.cdp_endpoint)
                 context = await browser.new_context()
-                page = await context.new_page()
-                page.set_default_navigation_timeout(self.browser.settings.navigation_timeout_ms)
-                page.set_default_timeout(self.browser.settings.navigation_timeout_ms)
+                browser_page = await context.new_page()
+                browser_page.set_default_navigation_timeout(self.browser.settings.navigation_timeout_ms)
+                browser_page.set_default_timeout(self.browser.settings.navigation_timeout_ms)
                 await sleep_random_ms(pacing.pre_navigation_delay_ms)
-                await page.goto(
-                    url,
-                    wait_until="domcontentloaded",
-                    timeout=self.browser.settings.navigation_timeout_ms,
-                )
+                if engine == "google" and keyword:
+                    await self._navigate_google_home_search(
+                        browser_page,
+                        keyword,
+                        url,
+                        page,
+                        image_search,
+                        pacing,
+                    )
+                else:
+                    await browser_page.goto(
+                        url,
+                        wait_until="domcontentloaded",
+                        timeout=self.browser.settings.navigation_timeout_ms,
+                    )
                 await sleep_random_ms(pacing.post_navigation_delay_ms)
                 selector = ", ".join(selectors)
                 try:
-                    await page.wait_for_selector(
+                    await browser_page.wait_for_selector(
                         selector,
                         timeout=min(pacing.selector_timeout_ms, self.browser.settings.navigation_timeout_ms),
                     )
                 except PlaywrightError:
                     pass
-                await scroll_search_results(page, pacing)
+                await scroll_search_results(browser_page, pacing)
                 rows = []
                 deadline = asyncio.get_running_loop().time() + min(
                     10,
                     self.browser.settings.navigation_timeout_ms / 1000,
                 )
                 while asyncio.get_running_loop().time() < deadline:
-                    rows = await page.evaluate(extract_js)
+                    rows = await browser_page.evaluate(extract_js)
                     if rows:
                         break
                     await sleep_random_ms(pacing.poll_interval_ms)
@@ -484,14 +616,42 @@ class SearchService:
                     "rows": [],
                     "images": [],
                     "totalPages": 1,
-                    "title": await page.title(),
-                    "bodyTextSample": await page.evaluate(
+                    "title": await browser_page.title(),
+                    "bodyTextSample": await browser_page.evaluate(
                         "() => (document.body && document.body.innerText || '').slice(0, 500)"
                     ),
                 }
         finally:
             await close_quietly(context)
             await close_quietly(browser)
+
+    async def _navigate_google_home_search(
+        self,
+        page,
+        keyword: str,
+        target_url: str,
+        target_page: int,
+        image_search: bool,
+        pacing: SearchPacing,
+    ) -> None:
+        await page.goto(
+            GOOGLE_HOME_URL,
+            wait_until="domcontentloaded",
+            timeout=self.browser.settings.navigation_timeout_ms,
+        )
+        await sleep_random_ms(pacing.post_navigation_delay_ms)
+        await submit_google_home_search(page, keyword, pacing)
+        await sleep_random_ms(pacing.post_navigation_delay_ms)
+        if image_search and not is_google_images_url(page.url):
+            await open_google_images_results(page, pacing)
+            await sleep_random_ms(pacing.post_navigation_delay_ms)
+        current_page = google_result_page_index(page.url)
+        if target_page > 1 and current_page != target_page:
+            await page.goto(
+                target_url,
+                wait_until="domcontentloaded",
+                timeout=self.browser.settings.navigation_timeout_ms,
+            )
 
     async def search_img(self, keyword: str, engine: str | None = None, page: int = 1) -> ImageSearchResult:
         if not keyword.strip():
@@ -507,6 +667,9 @@ class SearchService:
             adapter.build_extract_js(),
             adapter.selectors,
             engine=selected,
+            keyword=keyword,
+            page=page,
+            image_search=True,
         )
         if isinstance(raw_payload, dict):
             raw_rows = raw_payload.get("images")
