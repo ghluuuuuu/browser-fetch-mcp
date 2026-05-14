@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "obscura-web-fetch-mcp"
+version = "0.1.0"
+description = "MCP web fetch service backed by an Obscura CDP endpoint."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "mcp>=1.13.0",
+    "playwright>=1.49.0",
+    "pydantic>=2.10.0",
+    "PyYAML>=6.0.2",
+    "starlette>=0.40.0",
+    "uvicorn>=0.30.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.8.0",
+]
+
+[project.scripts]
+obscura-web-fetch-mcp = "obscura_web_fetch_mcp.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/obscura_web_fetch_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

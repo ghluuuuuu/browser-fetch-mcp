@@ -1,0 +1,37 @@
+services:
+  chromote:
+    build:
+      context: ./vendor/chromote
+    image: browser-fetch-mcp-chromote
+    restart: always
+    environment:
+      VNCPASS: ${VNCPASS:-P4ssw0rd!}
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:9222:9222"
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - chromote-data:/data
+    shm_size: "1gb"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:9222/json/version || (pkill -f chrome; exit 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  web-fetch-mcp:
+    build:
+      context: .
+    image: browser-fetch-mcp-service
+    restart: always
+    depends_on:
+      - chromote
+    network_mode: "service:chromote"
+    environment:
+      CDP_ENDPOINT: http://127.0.0.1:9222
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8000
+
+volumes:
+  chromote-data:

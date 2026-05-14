@@ -1,0 +1,3 @@
+cdp_endpoint: ws://file:9222
+transport: sse
+port: 9000
