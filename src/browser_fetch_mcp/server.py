@@ -238,16 +238,24 @@ def create_mcp(settings: Settings | None = None) -> FastMCP:
             int,
             Field(description="Search result page number, starting at 1. Try page > 1 for more results."),
         ] = 1,
+        enable_show_link_context: Annotated[
+            bool,
+            Field(
+                description=(
+                    "Whether to fetch about 4000 characters of preview content for each result link. "
+                    "Enabled by default so search results can provide immediate page context."
+                ),
+            ),
+        ] = True,
     ) -> dict:
         """Search the web and return candidate result links.
 
-    This tool only discovers URLs and returns search metadata such as titles,
-    snippets, and links. It does not open pages or retrieve full content.
+    This tool discovers URLs and returns titles, links, and, by default, about
+    4000 characters of preview content for each link.
     Critical rule:
-    Do not use search snippets as the final source of truth. After finding useful
-    URLs, call `fetch` for one page or `batchFetch` for multiple pages to read
-    the actual page content. Final answers that require factual, current, or
-    source-backed information should be based on fetched content, not snippets.
+    Do not use search metadata alone as the final source of truth. If the preview
+    is insufficient, call `fetch` for one page or `batchFetch` for multiple pages
+    to read more actual page content.
     Use cases:
     - Current/recent information, news, weather, prices, policies.
     - Official docs, API references, release notes, package versions.
@@ -265,7 +273,12 @@ def create_mcp(settings: Settings | None = None) -> FastMCP:
     - Use multiple sources for fast-changing or conflicting information.
     - If fetched content is blocked, empty, or irrelevant, try other result URLs.
         """
-        result = await search_service.search(keyword, engine=engine or None, page=page)
+        result = await search_service.search(
+            keyword,
+            engine=engine or None,
+            page=page,
+            enable_show_link_context=enable_show_link_context,
+        )
         return result.model_dump()
 
     @mcp.tool(name="search_img")

@@ -16,6 +16,7 @@ def test_browser_context_options_match_requested_fingerprint() -> None:
     assert options["device_scale_factor"] == 2
     assert options["locale"] == "zh-CN"
     assert options["timezone_id"] == "Asia/Shanghai"
+    assert options["service_workers"] == "block"
     assert options["extra_http_headers"] == {
         "Accept-Language": "zh-CN,zh;q=0.9",
         "DNT": "1",

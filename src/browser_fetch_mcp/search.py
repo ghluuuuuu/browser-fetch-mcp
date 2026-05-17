@@ -19,6 +19,7 @@ from .playwright_utils import close_quietly
 
 HOMEPAGE_INTERACTION_ENGINES = {"bing"}
 BING_HOME_URL = "https://www.bing.com/"
+SEARCH_LINK_CONTEXT_MAX_LENGTH = 4_000
 BING_SEARCH_INPUT_SELECTORS = [
     'textarea[name="q"]',
     'input[name="q"]',
@@ -517,7 +518,14 @@ class SearchService:
     def __init__(self, browser: BrowserClient):
         self.browser = browser
 
-    async def search(self, keyword: str, engine: str | None = None, page: int = 1) -> SearchResult:
+    async def search(
+        self,
+        keyword: str,
+        engine: str | None = None,
+        page: int = 1,
+        *,
+        enable_show_link_context: bool = True,
+    ) -> SearchResult:
         if not keyword.strip():
             raise ValueError("keyword must not be empty")
         selected = normalize_engine(engine, self.browser.settings.default_search_engine)
@@ -549,6 +557,8 @@ class SearchService:
             total_pages = 1
             debug = None
         rows = parse_search_rows(raw_rows)
+        if enable_show_link_context and rows:
+            rows = await self._add_link_context(rows)
         return SearchResult(
             keyword=keyword,
             engine=selected,
@@ -557,6 +567,17 @@ class SearchService:
             rows=rows,
             debug=debug if not rows else None,
         )
+
+    async def _add_link_context(self, rows: list[SearchRow]) -> list[SearchRow]:
+        results = await self.browser.batch_fetch(
+            [row.url for row in rows],
+            start_index=0,
+            max_length=SEARCH_LINK_CONTEXT_MAX_LENGTH,
+        )
+        return [
+            row.model_copy(update={"context": result.content})
+            for row, result in zip(rows, results, strict=True)
+        ]
 
     async def _evaluate_search(
         self,

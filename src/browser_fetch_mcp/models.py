@@ -32,6 +32,7 @@ class BatchFetchResult(BaseModel):
 class SearchRow(BaseModel):
     title: str
     url: str
+    context: str = ""
 
 
 class SearchResult(BaseModel):

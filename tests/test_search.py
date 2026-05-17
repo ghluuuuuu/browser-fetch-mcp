@@ -70,8 +70,8 @@ def test_parse_search_rows_filters_invalid_and_deduplicates() -> None:
     )
 
     assert [row.model_dump() for row in rows] == [
-        {"title": "One", "url": "https://example.com/1"},
-        {"title": "Two", "url": "https://example.com/2"},
+        {"title": "One", "url": "https://example.com/1", "context": ""},
+        {"title": "Two", "url": "https://example.com/2", "context": ""},
     ]
 
 
@@ -131,10 +131,10 @@ def test_parse_search_rows_from_static_html_fixture() -> None:
     rows = parse_search_rows(raw_rows)
 
     assert [row.model_dump() for row in rows] == [
-        {"title": "Bing Result", "url": "https://example.com/bing"},
-        {"title": "Alpha Result", "url": "https://example.com/alpha"},
-        {"title": "Beta Result", "url": "https://example.com/beta"},
-        {"title": "Gamma Result", "url": "https://example.com/gamma"},
+        {"title": "Bing Result", "url": "https://example.com/bing", "context": ""},
+        {"title": "Alpha Result", "url": "https://example.com/alpha", "context": ""},
+        {"title": "Beta Result", "url": "https://example.com/beta", "context": ""},
+        {"title": "Gamma Result", "url": "https://example.com/gamma", "context": ""},
     ]
 
 
@@ -150,7 +150,7 @@ def test_bing_adapter_selectors_skip_header_navigation() -> None:
     rows = parse_search_rows(raw_rows)
 
     assert [row.model_dump() for row in rows] == [
-        {"title": "Bing Result", "url": "https://example.com/bing"}
+        {"title": "Bing Result", "url": "https://example.com/bing", "context": ""}
     ]
 
 
@@ -195,6 +195,15 @@ class FakeSettings:
 
 class FakeBrowser:
     settings = FakeSettings()
+
+    async def batch_fetch(self, urls, *, start_index, max_length, **kwargs):
+        del start_index, kwargs
+
+        class Result:
+            def __init__(self, url):
+                self.content = f"preview for {url}"[:max_length]
+
+        return [Result(url) for url in urls]
 
 
 async def test_evaluate_search_retries_until_rows(monkeypatch) -> None:
@@ -966,6 +975,27 @@ async def test_search_returns_page_metadata(monkeypatch) -> None:
     assert result.current_page == 3
     assert result.total_pages == 9
     assert result.rows[0].url == "https://example.com"
+    assert result.rows[0].context == "preview for https://example.com"
+
+
+async def test_search_can_disable_link_context(monkeypatch) -> None:
+    async def fake_evaluate_search(self, url, extract_js, selectors, *, engine=None, **kwargs):
+        del self, url, extract_js, selectors, engine, kwargs
+        return {
+            "rows": [{"title": "Result", "url": "https://example.com"}],
+            "totalPages": 1,
+        }
+
+    class NoFetchBrowser(FakeBrowser):
+        async def batch_fetch(self, *args, **kwargs):
+            raise AssertionError("batch_fetch should not be called")
+
+    monkeypatch.setattr(SearchService, "_evaluate_search", fake_evaluate_search)
+
+    service = SearchService(NoFetchBrowser())  # type: ignore[arg-type]
+    result = await service.search("query", engine="bing", enable_show_link_context=False)
+
+    assert result.rows[0].context == ""
 
 
 async def test_search_img_returns_image_metadata(monkeypatch) -> None:

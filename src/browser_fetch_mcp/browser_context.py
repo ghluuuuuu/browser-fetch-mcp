@@ -52,6 +52,7 @@ def browser_context_options(settings: Settings | None = None) -> dict[str, Any]:
         "timezone_id": TIMEZONE_ID,
         "is_mobile": False,
         "has_touch": False,
+        "service_workers": "block",
         "extra_http_headers": {
             "Accept-Language": "zh-CN,zh;q=0.9",
             "DNT": "1",
