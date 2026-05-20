@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
@@ -32,7 +32,15 @@ class BatchFetchResult(BaseModel):
 class SearchRow(BaseModel):
     title: str
     url: str
+    snippet: str = ""
     context: str = ""
+    context_status: Literal[
+        "not_requested",
+        "fetched",
+        "skipped",
+        "error",
+        "timeout",
+    ] = "not_requested"
 
 
 class SearchResult(BaseModel):

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import json
 import random
 import re
+from typing import Literal
 from urllib.parse import parse_qs, quote, quote_plus, urlparse
 
 from playwright.async_api import Error as PlaywrightError
@@ -19,7 +20,8 @@ from .playwright_utils import close_quietly
 
 HOMEPAGE_INTERACTION_ENGINES = {"bing"}
 BING_HOME_URL = "https://www.bing.com/"
-SEARCH_LINK_CONTEXT_MAX_LENGTH = 4_000
+DEFAULT_SEARCH_CONTEXT_MAX_LENGTH = 1_000
+SearchContextMode = Literal["none", "snippet", "preview", "full"]
 BING_SEARCH_INPUT_SELECTORS = [
     'textarea[name="q"]',
     'input[name="q"]',
@@ -194,18 +196,37 @@ def is_image_results_url(engine: SearchEngine, url: str) -> bool:
 
 def build_search_extract_js(selectors: list[str]) -> str:
     encoded_selectors = json.dumps(selectors)
-    script = """
+    script = r"""
 () => {
   const rows = [];
   const seen = new Set();
   const selectors = __SELECTORS__;
+  const cleanText = (value) => (value || '').replace(/\s+/g, ' ').trim();
+  const findContainer = (node) => (
+    node.closest?.('.b_algo, .g, .result, .c-container, li') || node.parentElement || node
+  );
+  const findSnippet = (node, title) => {
+    const container = findContainer(node);
+    const snippetSelectors = [
+      '.b_caption p', '.b_caption', '.VwiC3b', '.IsZvec',
+      '.aCOpRe', '.c-abstract', '.c-span-last', '.content-right_8Zs40'
+    ];
+    for (const snippetSelector of snippetSelectors) {
+      const snippetNode = container.querySelector?.(snippetSelector);
+      const text = cleanText(snippetNode?.innerText || snippetNode?.textContent || '');
+      if (text && text !== title) return text;
+    }
+    const text = cleanText(container.innerText || container.textContent || '');
+    if (!text || text === title) return '';
+    return cleanText(text.replace(title, '')).slice(0, 500);
+  };
   for (const selector of selectors) {
     for (const node of document.querySelectorAll(selector)) {
       const anchor = node.matches?.('a[href]')
         ? node
         : node.closest('a[href]') || node.querySelector?.('a[href]');
       const rawUrl = anchor?.getAttribute('href') || '';
-      const title = (node.innerText || anchor?.innerText || '').trim();
+      const title = cleanText(node.innerText || anchor?.innerText || '');
       let url = rawUrl;
       if (rawUrl.startsWith('/url?')) {
         const target = new URL(rawUrl, location.href).searchParams.get('q');
@@ -214,7 +235,7 @@ def build_search_extract_js(selectors: list[str]) -> str:
       if (!title || !url || seen.has(url)) continue;
       if (!/^https?:\\/\\//i.test(url)) continue;
       seen.add(url);
-      rows.push({title, url});
+      rows.push({title, url, snippet: findSnippet(node, title)});
     }
   }
   const pageNumbers = [];
@@ -464,7 +485,7 @@ def normalize_engine(engine: str | None, default_engine: SearchEngine) -> Search
     return selected  # type: ignore[return-value]
 
 
-def parse_search_rows(raw_rows: object) -> list[SearchRow]:
+def parse_search_rows(raw_rows: object, *, include_snippet: bool = True) -> list[SearchRow]:
     if not isinstance(raw_rows, list):
         return []
 
@@ -475,13 +496,28 @@ def parse_search_rows(raw_rows: object) -> list[SearchRow]:
             continue
         title = str(item.get("title") or "").strip()
         url = str(item.get("url") or "").strip()
+        snippet = str(item.get("snippet") or "").strip() if include_snippet else ""
         if not title or not url or url in seen:
             continue
         if not url.lower().startswith(("http://", "https://")):
             continue
         seen.add(url)
-        rows.append(SearchRow(title=title, url=url))
+        rows.append(SearchRow(title=title, url=url, snippet=snippet))
     return rows
+
+
+def normalize_context_mode(
+    context_mode: str | None,
+    enable_show_link_context: bool | None,
+) -> SearchContextMode:
+    if context_mode is not None:
+        selected = context_mode.strip().lower()
+        if selected not in {"none", "snippet", "preview", "full"}:
+            raise ValueError("context_mode must be one of: none, snippet, preview, full")
+        return selected  # type: ignore[return-value]
+    if enable_show_link_context is True:
+        return "full"
+    return "snippet"
 
 
 def parse_image_rows(raw_rows: object) -> list[ImageSearchItem]:
@@ -524,13 +560,21 @@ class SearchService:
         engine: str | None = None,
         page: int = 1,
         *,
-        enable_show_link_context: bool = True,
+        enable_show_link_context: bool | None = None,
+        context_mode: str | None = None,
+        context_top_k: int = 3,
+        context_max_length: int = DEFAULT_SEARCH_CONTEXT_MAX_LENGTH,
     ) -> SearchResult:
         if not keyword.strip():
             raise ValueError("keyword must not be empty")
         selected = normalize_engine(engine, self.browser.settings.default_search_engine)
         if page < 1:
             raise ValueError("page must be greater than or equal to 1")
+        selected_context_mode = normalize_context_mode(context_mode, enable_show_link_context)
+        if context_top_k < 0:
+            raise ValueError("context_top_k must be greater than or equal to 0")
+        if context_max_length < 1:
+            raise ValueError("context_max_length must be greater than 0")
 
         adapter = ADAPTERS[selected]
         search_url = adapter.build_url(keyword, page=page)
@@ -556,9 +600,15 @@ class SearchService:
             raw_rows = raw_payload
             total_pages = 1
             debug = None
-        rows = parse_search_rows(raw_rows)
-        if enable_show_link_context and rows:
-            rows = await self._add_link_context(rows)
+        rows = parse_search_rows(raw_rows, include_snippet=selected_context_mode != "none")
+        if selected_context_mode == "none":
+            rows = [row.model_copy(update={"context_status": "skipped"}) for row in rows]
+        if rows and selected_context_mode in {"preview", "full"}:
+            rows = await self._add_link_context(
+                rows,
+                top_k=context_top_k if selected_context_mode == "preview" else len(rows),
+                max_length=context_max_length,
+            )
         return SearchResult(
             keyword=keyword,
             engine=selected,
@@ -568,15 +618,35 @@ class SearchService:
             debug=debug if not rows else None,
         )
 
-    async def _add_link_context(self, rows: list[SearchRow]) -> list[SearchRow]:
+    async def _add_link_context(
+        self,
+        rows: list[SearchRow],
+        *,
+        top_k: int,
+        max_length: int,
+    ) -> list[SearchRow]:
+        selected_rows = rows[:top_k]
+        skipped_rows = rows[top_k:]
+        if not selected_rows:
+            return [row.model_copy(update={"context_status": "skipped"}) for row in rows]
         results = await self.browser.batch_fetch(
-            [row.url for row in rows],
+            [row.url for row in selected_rows],
             start_index=0,
-            max_length=SEARCH_LINK_CONTEXT_MAX_LENGTH,
+            max_length=max_length,
         )
+        enriched_rows = []
+        for row, result in zip(selected_rows, results, strict=True):
+            if getattr(result, "ok", True):
+                enriched_rows.append(
+                    row.model_copy(update={"context": result.content, "context_status": "fetched"})
+                )
+                continue
+            error = str(getattr(result, "error", "") or "").lower()
+            status = "timeout" if "timeout" in error or "timed out" in error else "error"
+            enriched_rows.append(row.model_copy(update={"context": "", "context_status": status}))
         return [
-            row.model_copy(update={"context": result.content})
-            for row, result in zip(rows, results, strict=True)
+            *enriched_rows,
+            *(row.model_copy(update={"context_status": "skipped"}) for row in skipped_rows),
         ]
 
     async def _evaluate_search(

@@ -8,9 +8,10 @@ from browser_fetch_mcp.search import (
     ADAPTERS,
     IMAGE_ADAPTERS,
     SearchService,
+    normalize_context_mode,
+    normalize_engine,
     pacing_for_engine,
     parse_image_rows,
-    normalize_engine,
     parse_search_rows,
 )
 
@@ -65,13 +66,25 @@ def test_parse_search_rows_filters_invalid_and_deduplicates() -> None:
             {"title": "", "url": "https://example.com/empty"},
             {"title": "Duplicate", "url": "https://example.com/1"},
             {"title": "Images", "url": "/images/search?q=test"},
-            {"title": "Two", "url": "https://example.com/2"},
+            {"title": "Two", "url": "https://example.com/2", "snippet": "Second result"},
         ],
     )
 
     assert [row.model_dump() for row in rows] == [
-        {"title": "One", "url": "https://example.com/1", "context": ""},
-        {"title": "Two", "url": "https://example.com/2", "context": ""},
+        {
+            "title": "One",
+            "url": "https://example.com/1",
+            "snippet": "",
+            "context": "",
+            "context_status": "not_requested",
+        },
+        {
+            "title": "Two",
+            "url": "https://example.com/2",
+            "snippet": "Second result",
+            "context": "",
+            "context_status": "not_requested",
+        },
     ]
 
 
@@ -84,6 +97,25 @@ def test_parse_search_rows_returns_all_valid_rows() -> None:
     )
 
     assert len(rows) == 2
+
+
+def test_parse_search_rows_can_exclude_snippets() -> None:
+    rows = parse_search_rows(
+        [{"title": "One", "url": "https://example.com/1", "snippet": "Search summary"}],
+        include_snippet=False,
+    )
+
+    assert rows[0].snippet == ""
+
+
+def test_normalize_context_mode_defaults_legacy_and_validation() -> None:
+    assert normalize_context_mode(None, None) == "snippet"
+    assert normalize_context_mode(None, False) == "snippet"
+    assert normalize_context_mode(None, True) == "full"
+    assert normalize_context_mode("preview", True) == "preview"
+
+    with pytest.raises(ValueError, match="context_mode"):
+        normalize_context_mode("deep", None)
 
 
 def test_parse_image_rows_filters_and_keeps_dimensions() -> None:
@@ -131,10 +163,34 @@ def test_parse_search_rows_from_static_html_fixture() -> None:
     rows = parse_search_rows(raw_rows)
 
     assert [row.model_dump() for row in rows] == [
-        {"title": "Bing Result", "url": "https://example.com/bing", "context": ""},
-        {"title": "Alpha Result", "url": "https://example.com/alpha", "context": ""},
-        {"title": "Beta Result", "url": "https://example.com/beta", "context": ""},
-        {"title": "Gamma Result", "url": "https://example.com/gamma", "context": ""},
+        {
+            "title": "Bing Result",
+            "url": "https://example.com/bing",
+            "snippet": "",
+            "context": "",
+            "context_status": "not_requested",
+        },
+        {
+            "title": "Alpha Result",
+            "url": "https://example.com/alpha",
+            "snippet": "",
+            "context": "",
+            "context_status": "not_requested",
+        },
+        {
+            "title": "Beta Result",
+            "url": "https://example.com/beta",
+            "snippet": "",
+            "context": "",
+            "context_status": "not_requested",
+        },
+        {
+            "title": "Gamma Result",
+            "url": "https://example.com/gamma",
+            "snippet": "",
+            "context": "",
+            "context_status": "not_requested",
+        },
     ]
 
 
@@ -150,7 +206,13 @@ def test_bing_adapter_selectors_skip_header_navigation() -> None:
     rows = parse_search_rows(raw_rows)
 
     assert [row.model_dump() for row in rows] == [
-        {"title": "Bing Result", "url": "https://example.com/bing", "context": ""}
+        {
+            "title": "Bing Result",
+            "url": "https://example.com/bing",
+            "snippet": "",
+            "context": "",
+            "context_status": "not_requested",
+        }
     ]
 
 
@@ -166,6 +228,14 @@ def test_search_extract_js_reads_google_pagination() -> None:
 
     assert "#botstuff a" in script
     assert 'a[aria-label^="Page "]' in script
+
+
+def test_search_extract_js_reads_snippets() -> None:
+    script = ADAPTERS["bing"].build_extract_js()
+
+    assert "snippet" in script
+    assert ".b_caption p" in script
+    assert "findSnippet" in script
 
 
 def test_image_extract_js_reads_image_metadata() -> None:
@@ -975,7 +1045,160 @@ async def test_search_returns_page_metadata(monkeypatch) -> None:
     assert result.current_page == 3
     assert result.total_pages == 9
     assert result.rows[0].url == "https://example.com"
-    assert result.rows[0].context == "preview for https://example.com"
+    assert result.rows[0].context == ""
+    assert result.rows[0].context_status == "not_requested"
+
+
+async def test_search_default_does_not_fetch_link_context(monkeypatch) -> None:
+    async def fake_evaluate_search(self, url, extract_js, selectors, *, engine=None, **kwargs):
+        del self, url, extract_js, selectors, engine, kwargs
+        return {
+            "rows": [{"title": "Result", "url": "https://example.com", "snippet": "Summary"}],
+            "totalPages": 1,
+        }
+
+    class NoFetchBrowser(FakeBrowser):
+        async def batch_fetch(self, *args, **kwargs):
+            raise AssertionError("batch_fetch should not be called")
+
+    monkeypatch.setattr(SearchService, "_evaluate_search", fake_evaluate_search)
+
+    service = SearchService(NoFetchBrowser())  # type: ignore[arg-type]
+    result = await service.search("query", engine="bing")
+
+    assert result.rows[0].snippet == "Summary"
+    assert result.rows[0].context == ""
+    assert result.rows[0].context_status == "not_requested"
+
+
+async def test_search_none_mode_omits_snippet_and_marks_skipped(monkeypatch) -> None:
+    async def fake_evaluate_search(self, url, extract_js, selectors, *, engine=None, **kwargs):
+        del self, url, extract_js, selectors, engine, kwargs
+        return {
+            "rows": [{"title": "Result", "url": "https://example.com", "snippet": "Summary"}],
+            "totalPages": 1,
+        }
+
+    class NoFetchBrowser(FakeBrowser):
+        async def batch_fetch(self, *args, **kwargs):
+            raise AssertionError("batch_fetch should not be called")
+
+    monkeypatch.setattr(SearchService, "_evaluate_search", fake_evaluate_search)
+
+    service = SearchService(NoFetchBrowser())  # type: ignore[arg-type]
+    result = await service.search("query", engine="bing", context_mode="none")
+
+    assert result.rows[0].snippet == ""
+    assert result.rows[0].context == ""
+    assert result.rows[0].context_status == "skipped"
+
+
+async def test_search_preview_fetches_top_k_and_marks_skipped(monkeypatch) -> None:
+    async def fake_evaluate_search(self, url, extract_js, selectors, *, engine=None, **kwargs):
+        del self, url, extract_js, selectors, engine, kwargs
+        return {
+            "rows": [
+                {"title": "One", "url": "https://example.com/1", "snippet": "First"},
+                {"title": "Two", "url": "https://example.com/2", "snippet": "Second"},
+                {"title": "Three", "url": "https://example.com/3", "snippet": "Third"},
+            ],
+            "totalPages": 1,
+        }
+
+    class RecordingBrowser(FakeBrowser):
+        def __init__(self):
+            self.calls = []
+
+        async def batch_fetch(self, urls, *, start_index, max_length, **kwargs):
+            self.calls.append((urls, start_index, max_length, kwargs))
+            return await super().batch_fetch(
+                urls,
+                start_index=start_index,
+                max_length=max_length,
+                **kwargs,
+            )
+
+    monkeypatch.setattr(SearchService, "_evaluate_search", fake_evaluate_search)
+
+    browser = RecordingBrowser()
+    service = SearchService(browser)  # type: ignore[arg-type]
+    result = await service.search(
+        "query",
+        engine="bing",
+        context_mode="preview",
+        context_top_k=2,
+        context_max_length=7,
+    )
+
+    assert browser.calls[0][0] == ["https://example.com/1", "https://example.com/2"]
+    assert browser.calls[0][2] == 7
+    assert [row.context_status for row in result.rows] == ["fetched", "fetched", "skipped"]
+    assert [row.context for row in result.rows] == ["preview", "preview", ""]
+
+
+async def test_search_full_fetches_all_rows(monkeypatch) -> None:
+    async def fake_evaluate_search(self, url, extract_js, selectors, *, engine=None, **kwargs):
+        del self, url, extract_js, selectors, engine, kwargs
+        return {
+            "rows": [
+                {"title": "One", "url": "https://example.com/1"},
+                {"title": "Two", "url": "https://example.com/2"},
+            ],
+            "totalPages": 1,
+        }
+
+    class RecordingBrowser(FakeBrowser):
+        def __init__(self):
+            self.urls = []
+
+        async def batch_fetch(self, urls, *, start_index, max_length, **kwargs):
+            self.urls = urls
+            return await super().batch_fetch(
+                urls,
+                start_index=start_index,
+                max_length=max_length,
+                **kwargs,
+            )
+
+    monkeypatch.setattr(SearchService, "_evaluate_search", fake_evaluate_search)
+
+    browser = RecordingBrowser()
+    service = SearchService(browser)  # type: ignore[arg-type]
+    result = await service.search("query", engine="bing", context_mode="full")
+
+    assert browser.urls == ["https://example.com/1", "https://example.com/2"]
+    assert [row.context_status for row in result.rows] == ["fetched", "fetched"]
+
+
+async def test_search_preview_marks_fetch_failures(monkeypatch) -> None:
+    async def fake_evaluate_search(self, url, extract_js, selectors, *, engine=None, **kwargs):
+        del self, url, extract_js, selectors, engine, kwargs
+        return {
+            "rows": [
+                {"title": "One", "url": "https://example.com/1"},
+                {"title": "Two", "url": "https://example.com/2"},
+            ],
+            "totalPages": 1,
+        }
+
+    class Result:
+        def __init__(self, content="", ok=True, error=None):
+            self.content = content
+            self.ok = ok
+            self.error = error
+
+    class FailingBrowser(FakeBrowser):
+        async def batch_fetch(self, urls, *, start_index, max_length, **kwargs):
+            del urls, start_index, max_length, kwargs
+            return [Result("ok"), Result(ok=False, error="Timeout 30000ms exceeded")]
+
+    monkeypatch.setattr(SearchService, "_evaluate_search", fake_evaluate_search)
+
+    service = SearchService(FailingBrowser())  # type: ignore[arg-type]
+    result = await service.search("query", engine="bing", context_mode="preview", context_top_k=2)
+
+    assert [row.context_status for row in result.rows] == ["fetched", "timeout"]
+    assert [row.context for row in result.rows] == ["ok", ""]
 
 
 async def test_search_can_disable_link_context(monkeypatch) -> None:
@@ -996,6 +1219,26 @@ async def test_search_can_disable_link_context(monkeypatch) -> None:
     result = await service.search("query", engine="bing", enable_show_link_context=False)
 
     assert result.rows[0].context == ""
+    assert result.rows[0].context_status == "not_requested"
+
+
+async def test_search_legacy_enable_show_link_context_fetches_full(monkeypatch) -> None:
+    async def fake_evaluate_search(self, url, extract_js, selectors, *, engine=None, **kwargs):
+        del self, url, extract_js, selectors, engine, kwargs
+        return {
+            "rows": [
+                {"title": "One", "url": "https://example.com/1"},
+                {"title": "Two", "url": "https://example.com/2"},
+            ],
+            "totalPages": 1,
+        }
+
+    monkeypatch.setattr(SearchService, "_evaluate_search", fake_evaluate_search)
+
+    service = SearchService(FakeBrowser())  # type: ignore[arg-type]
+    result = await service.search("query", engine="bing", enable_show_link_context=True)
+
+    assert [row.context_status for row in result.rows] == ["fetched", "fetched"]
 
 
 async def test_search_img_returns_image_metadata(monkeypatch) -> None:

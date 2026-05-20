@@ -48,7 +48,7 @@ AI Agent 在浏览网页时经常会遇到几个问题：原始 HTTP 响应不�
 
 ### `search`
 
-查询 `baidu`、`google` 或 `bing`，返回标题、摘要、URL 等搜索结果元数据。搜索结果只建议用于发现候选页面；真正作为依据前，请继续使用 `fetch` 打开来源页面。
+查询 `baidu`、`google` 或 `bing`，默认只打开搜索结果页并返回标题、URL、SERP 摘要 `snippet` 等元数据。搜索结果只建议用于发现候选页面；真正作为依据前，请继续使用 `fetch` 打开来源页面。需要少量目标网页预览时，可以设置 `context_mode="preview"` 并通过 `context_top_k`、`context_max_length` 控制预览数量和长度；需要兼容旧的全量预览行为时，可以设置 `context_mode="full"`。
 
 ### `search_img`
 
@@ -56,11 +56,12 @@ AI Agent 在浏览网页时经常会遇到几个问题：原始 HTTP 响应不�
 
 ## 推荐 AI 使用流程
 
-1. 使用 `search` 发现候选 URL。
-2. 使用 `fetch` 或 `batch-fetch` 读取真实来源页面。
-3. 只有在需要时才请求链接和图片，避免占用过多上下文。
-4. 对页面内特定内容提取，可以使用 `exec_js` 编写浏览器端 JavaScript。
-5. 最终回答应基于 `fetch` 得到的页面内容，而不是搜索结果摘要。
+1. 使用默认 `search` 发现候选 URL，并用 `snippet` 快速判断哪些结果值得继续读取。
+2. 需要快速预览少量结果时，使用 `search` 的 `context_mode="preview"`，并保持较小的 `context_top_k` 和 `context_max_length`。
+3. 使用 `fetch` 或 `batch-fetch` 读取真实来源页面，作为最终回答依据。
+4. 只有在需要时才请求链接和图片，避免占用过多上下文。
+5. 对页面内特定内容提取，可以使用 `exec_js` 编写浏览器端 JavaScript。
+6. 最终回答应基于 `fetch` 得到的页面内容，而不是搜索结果摘要。
 
 ## 本地运行
 

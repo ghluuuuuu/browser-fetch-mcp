@@ -238,20 +238,40 @@ def create_mcp(settings: Settings | None = None) -> FastMCP:
             int,
             Field(description="Search result page number, starting at 1. Try page > 1 for more results."),
         ] = 1,
-        enable_show_link_context: Annotated[
-            bool,
+        context_mode: Annotated[
+            str | None,
             Field(
                 description=(
-                    "Whether to fetch about 4000 characters of preview content for each result link. "
-                    "Enabled by default so search results can provide immediate page context."
+                    'Search context mode: "none" returns title/url only, "snippet" returns search-result '
+                    'snippets without opening result pages, "preview" fetches bounded context for top results, '
+                    'and "full" fetches context for every result.'
                 ),
             ),
-        ] = True,
+        ] = None,
+        context_top_k: Annotated[
+            int,
+            Field(description="Maximum number of top search results to fetch when context_mode is preview."),
+        ] = 3,
+        context_max_length: Annotated[
+            int,
+            Field(description="Maximum number of fetched context characters per search result preview."),
+        ] = 1_000,
+        enable_show_link_context: Annotated[
+            bool | None,
+            Field(
+                description=(
+                    "Deprecated compatibility flag. When context_mode is omitted, true maps to full fetched "
+                    "context and false maps to snippet-only discovery. Prefer context_mode."
+                ),
+            ),
+        ] = None,
     ) -> dict:
         """Search the web and return candidate result links.
 
-    This tool discovers URLs and returns titles, links, and, by default, about
-    4000 characters of preview content for each link.
+    This tool discovers URLs and returns titles, links, and search-result snippets
+    by default without opening each result page. Use context_mode="preview" for
+    bounded top-result page previews or context_mode="full" for the legacy eager
+    fetched-context behavior.
     Critical rule:
     Do not use search metadata alone as the final source of truth. If the preview
     is insufficient, call `fetch` for one page or `batchFetch` for multiple pages
@@ -278,6 +298,9 @@ def create_mcp(settings: Settings | None = None) -> FastMCP:
             engine=engine or None,
             page=page,
             enable_show_link_context=enable_show_link_context,
+            context_mode=context_mode,
+            context_top_k=context_top_k,
+            context_max_length=min(context_max_length, resolved.max_content_length),
         )
         return result.model_dump()
 

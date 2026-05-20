@@ -71,6 +71,18 @@ async def test_fetch_tools_expose_asset_include_flags() -> None:
     assert batch_schema["properties"]["include_images"]["default"] is False
 
 
+async def test_search_tool_exposes_context_mode_controls() -> None:
+    mcp = create_mcp(Settings())
+
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+
+    search_schema = tools["search"].inputSchema
+    assert search_schema["properties"]["context_mode"]["default"] is None
+    assert search_schema["properties"]["context_top_k"]["default"] == 3
+    assert search_schema["properties"]["context_max_length"]["default"] == 1000
+    assert search_schema["properties"]["enable_show_link_context"]["default"] is None
+
+
 async def test_tool_parameter_prompts_are_in_parameter_schema() -> None:
     mcp = create_mcp(Settings())
 
@@ -84,6 +96,8 @@ async def test_tool_parameter_prompts_are_in_parameter_schema() -> None:
 
     assert "Absolute http or https URL" in tools["fetch"].inputSchema["properties"]["url"]["description"]
     assert "Search engine" in tools["search"].inputSchema["properties"]["engine"]["description"]
+    assert "Search context mode" in tools["search"].inputSchema["properties"]["context_mode"]["description"]
+    assert "search-result snippets" in tools["search"].description
     assert "Image search engine" in tools["search_img"].inputSchema["properties"]["engine"]["description"]
     assert "Markdown image previews" in tools["search_img"].description
     assert "thumbnail or cached image URLs" in tools["search_img"].description
