@@ -238,6 +238,14 @@ def test_search_extract_js_reads_snippets() -> None:
     assert "findSnippet" in script
 
 
+def test_search_extract_js_emits_valid_regex_literals() -> None:
+    script = ADAPTERS["baidu"].build_extract_js()
+
+    assert "/^https?:\\/\\//i" in script
+    assert "/\\D+/g" in script
+    assert "/^https?:\\\\/\\\\//i" not in script
+
+
 def test_image_extract_js_reads_image_metadata() -> None:
     script = IMAGE_ADAPTERS["bing"].build_extract_js()
 

@@ -233,7 +233,7 @@ def build_search_extract_js(selectors: list[str]) -> str:
         if (target) url = target;
       }
       if (!title || !url || seen.has(url)) continue;
-      if (!/^https?:\\/\\//i.test(url)) continue;
+      if (!/^https?:\/\//i.test(url)) continue;
       seen.add(url);
       rows.push({title, url, snippet: findSnippet(node, title)});
     }
@@ -242,7 +242,7 @@ def build_search_extract_js(selectors: list[str]) -> str:
   for (const node of document.querySelectorAll('#b_pages a, #page a, #foot a, #botstuff a, a[aria-label^="Page "], a[aria-label^="第"]')) {
     const text = (node.innerText || node.textContent || '').trim();
     const label = node.getAttribute('aria-label') || '';
-    const value = Number.parseInt(text || label.replace(/\\D+/g, ''), 10);
+    const value = Number.parseInt(text || label.replace(/\D+/g, ''), 10);
     if (Number.isFinite(value)) pageNumbers.push(value);
   }
   return {
